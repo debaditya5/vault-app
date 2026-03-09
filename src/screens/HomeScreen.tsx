@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   FlatList,
@@ -6,6 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
   PanResponder,
   Dimensions,
 } from 'react-native';
@@ -31,7 +35,7 @@ const CARD_TOTAL_H = CARD_W + 60;
 
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
-  const { folders, addFolder, deleteFolder } = useVault();
+  const { folders, addFolder, deleteFolder, deleteFolderBatch, renameFolder, removeFolderCoverBatch, mediaByFolder } = useVault();
   const { lock } = useAuth();
 
   // ── Modal / sheet state ────────────────────────────────────────────────────
@@ -43,6 +47,9 @@ export default function HomeScreen() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [showBulkFolderSheet, setShowBulkFolderSheet] = useState(false);
+  const [bulkFolderSubSheet, setBulkFolderSubSheet] = useState<'rename' | 'details' | null>(null);
+  const [bulkRenameText, setBulkRenameText] = useState('');
 
   // ── Stable refs for PanResponder ───────────────────────────────────────────
   const foldersRef = useRef(folders);
@@ -55,19 +62,31 @@ export default function HomeScreen() {
   // Swipe gesture state
   const swipeAnchorState = useRef<boolean>(false);
   const swipedIds = useRef<Set<string>>(new Set());
+  const pendingSwipeItemId = useRef<string | null>(null);
 
   // Keep refs in sync
   useEffect(() => { foldersRef.current = folders; }, [folders]);
   useEffect(() => { selectedFolderIdsRef.current = selectedFolderIds; }, [selectedFolderIds]);
-  useEffect(() => { isSelectingRef.current = isSelecting; }, [isSelecting]);
+
+  // ── Hide / restore tab bar when entering / leaving select mode ────────────
+  useEffect(() => {
+    (navigation as any).setOptions({
+      tabBarStyle: isSelecting
+        ? { display: 'none' }
+        : { backgroundColor: '#1c1c1e', borderTopColor: '#333' },
+    });
+  }, [isSelecting, navigation]);
 
   // ── Select mode logic ──────────────────────────────────────────────────────
   const enterSelectMode = useCallback((folder: Folder) => {
+    isSelectingRef.current = true;
+    pendingSwipeItemId.current = folder.id;
     setIsSelecting(true);
     setSelectedFolderIds(new Set([folder.id]));
   }, []);
 
   const exitSelectMode = useCallback(() => {
+    isSelectingRef.current = false;
     setIsSelecting(false);
     setSelectedFolderIds(new Set());
   }, []);
@@ -109,13 +128,26 @@ export default function HomeScreen() {
 
   const swipePan = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => isSelectingRef.current,
+      // Never block the initial touch — let cards handle taps/long-presses normally.
+      onStartShouldSetPanResponder: () => false,
+      // Once a child (TouchableOpacity) owns the touch and the finger moves,
+      // steal the gesture if we're in select mode.
       onMoveShouldSetPanResponder: () => isSelectingRef.current,
       onPanResponderGrant: (evt) => {
-        swipedIds.current = new Set();
+        // Seed swipedIds with the long-pressed folder so we don't toggle it off.
+        const seedId = pendingSwipeItemId.current;
+        pendingSwipeItemId.current = null;
+        swipedIds.current = new Set(seedId ? [seedId] : []);
         const { pageX, pageY } = evt.nativeEvent;
         const folder = getFolderAtPos(pageX, pageY);
-        if (!folder) return;
+        if (!folder) {
+          swipeAnchorState.current = true;
+          return;
+        }
+        if (swipedIds.current.has(folder.id)) {
+          swipeAnchorState.current = true;
+          return;
+        }
         const isCurrentlySelected = selectedFolderIdsRef.current.has(folder.id);
         swipeAnchorState.current = !isCurrentlySelected;
         swipedIds.current.add(folder.id);
@@ -143,6 +175,28 @@ export default function HomeScreen() {
   ).current;
 
   // ── Folder CRUD ────────────────────────────────────────────────────────────
+  // ── Selection bar actions (Delete / Details) ───────────────────────────────
+  const handleSelectionBarDelete = () => {
+    if (selectedFolderIds.size === 1) {
+      const folder = folders.find((f) => selectedFolderIds.has(f.id));
+      if (folder) setFolderToDelete(folder);
+    } else {
+      setShowBulkDeleteConfirm(true);
+    }
+  };
+
+  const handleSelectionBarDetails = () => {
+    setBulkFolderSubSheet('details');
+  };
+
+  const nextUntitledName = (): string => {
+    const existingNames = new Set(folders.map((f) => f.name));
+    if (!existingNames.has('Untitled')) return 'Untitled';
+    let n = 1;
+    while (existingNames.has(`Untitled ${n}`)) n++;
+    return `Untitled ${n}`;
+  };
+
   const handleCreateFolder = async (name: string) => {
     const folder: Folder = {
       id: generateId(),
@@ -158,22 +212,58 @@ export default function HomeScreen() {
     if (!folderToDelete) return;
     await deleteFolder(folderToDelete.id);
     setFolderToDelete(null);
-  };
-
-  const handleBulkDelete = async () => {
-    for (const id of selectedFolderIds) {
-      await deleteFolder(id);
-    }
     exitSelectMode();
   };
 
-  const toggleSelectAll = () => {
-    if (selectedFolderIds.size === folders.length) {
-      setSelectedFolderIds(new Set());
+  const handleBulkDelete = async () => {
+    await deleteFolderBatch([...selectedFolderIds]);
+    exitSelectMode();
+  };
+
+  const handleMenuBtnPress = () => {
+    if (selectedFolderIds.size === 1) {
+      setActiveFolder(folders.find((f) => selectedFolderIds.has(f.id)) ?? null);
     } else {
-      setSelectedFolderIds(new Set(folders.map((f) => f.id)));
+      setShowBulkFolderSheet(true);
     }
   };
+
+  const bulkStats = useMemo(() => {
+    let imageCount = 0, videoCount = 0, totalBytes = 0;
+    for (const folderId of selectedFolderIds) {
+      for (const item of (mediaByFolder[folderId] ?? [])) {
+        if (item.mediaType === 'video') videoCount++; else imageCount++;
+        totalBytes += item.fileSizeBytes ?? 0;
+      }
+    }
+    return { imageCount, videoCount, totalBytes };
+  }, [selectedFolderIds, mediaByFolder]);
+
+  const handleBulkRenameSubmit = async () => {
+    const trimmed = bulkRenameText.trim();
+    if (!trimmed) return;
+    for (const id of selectedFolderIds) {
+      await renameFolder(id, trimmed);
+    }
+    setBulkFolderSubSheet(null);
+    setBulkRenameText('');
+    setShowBulkFolderSheet(false);
+    exitSelectMode();
+  };
+
+  const handleBulkRemoveCover = async () => {
+    await removeFolderCoverBatch([...selectedFolderIds]);
+    setShowBulkFolderSheet(false);
+    exitSelectMode();
+  };
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -185,11 +275,11 @@ export default function HomeScreen() {
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{selectedFolderIds.size} selected</Text>
-            <TouchableOpacity onPress={toggleSelectAll} style={styles.headerRight}>
-              <Text style={styles.selectAllText}>
-                {selectedFolderIds.size === folders.length ? 'None' : 'All'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={styles.menuIconBtn} onPress={handleMenuBtnPress}>
+                <Text style={styles.menuIconText}>···</Text>
+              </TouchableOpacity>
+            </View>
           </>
         ) : (
           <>
@@ -208,6 +298,7 @@ export default function HomeScreen() {
       <View
         ref={listWrapperRef}
         style={{ flex: 1 }}
+        {...swipePan.panHandlers}
         onLayout={() => {
           listWrapperRef.current?.measure((_x, _y, _w, _h, _px, py) => {
             listTop.current = py;
@@ -229,7 +320,6 @@ export default function HomeScreen() {
               onPress={() => handleFolderPress(item)}
               onLongPress={() => handleFolderLongPress(item)}
               selected={isSelecting ? selectedFolderIds.has(item.id) : undefined}
-              onMenuPress={() => setActiveFolder(item)}
             />
           )}
           ListEmptyComponent={
@@ -241,10 +331,6 @@ export default function HomeScreen() {
           }
         />
 
-        {/* Swipe-to-select overlay (absorbs touch events when selecting) */}
-        {isSelecting && (
-          <View style={StyleSheet.absoluteFill} {...swipePan.panHandlers} />
-        )}
       </View>
 
       {/* FAB — hidden when selecting */}
@@ -254,26 +340,122 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Bulk action bar */}
-      {isSelecting && selectedFolderIds.size > 0 && (
-        <View style={styles.actionBar}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => setShowBulkDeleteConfirm(true)}>
-            <Text style={styles.actionIcon}>🗑️</Text>
-            <Text style={[styles.actionText, styles.deleteText]}>Delete</Text>
+      {/* Selection action bar — replaces tab bar while selecting */}
+      {isSelecting && (
+        <View style={styles.selectionBar}>
+          <TouchableOpacity
+            style={styles.selectionBarBtn}
+            onPress={handleSelectionBarDetails}
+            disabled={selectedFolderIds.size === 0}
+          >
+            <Text style={styles.selectionBarIcon}>ℹ️</Text>
+            <Text style={styles.selectionBarLabel}>Details</Text>
+          </TouchableOpacity>
+          <View style={styles.selectionBarDivider} />
+          <TouchableOpacity
+            style={styles.selectionBarBtn}
+            onPress={handleSelectionBarDelete}
+            disabled={selectedFolderIds.size === 0}
+          >
+            <Text style={styles.selectionBarIcon}>🗑️</Text>
+            <Text style={[styles.selectionBarLabel, styles.selectionBarLabelDanger]}>Delete</Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* Bulk folder actions — details sub-sheet */}
+      <Modal transparent animationType="fade" visible={bulkFolderSubSheet === 'details'} onRequestClose={() => setBulkFolderSubSheet(null)}>
+        <TouchableOpacity style={bs.backdrop} activeOpacity={1} onPress={() => setBulkFolderSubSheet(null)}>
+          <View style={bs.detailsCard}>
+            <Text style={bs.detailsTitle}>
+              {selectedFolderIds.size === 1
+                ? folders.find((f) => selectedFolderIds.has(f.id))?.name ?? 'Folder'
+                : `${selectedFolderIds.size} Folders`}
+            </Text>
+            <View style={bs.detailsRow}>
+              <Text style={bs.detailsLabel}>Photos</Text>
+              <Text style={bs.detailsValue}>{bulkStats.imageCount}</Text>
+            </View>
+            <View style={bs.detailsRow}>
+              <Text style={bs.detailsLabel}>Videos</Text>
+              <Text style={bs.detailsValue}>{bulkStats.videoCount}</Text>
+            </View>
+            <View style={bs.detailsRow}>
+              <Text style={bs.detailsLabel}>Total Size</Text>
+              <Text style={bs.detailsValue}>{formatBytes(bulkStats.totalBytes)}</Text>
+            </View>
+            <TouchableOpacity style={bs.okBtn} onPress={() => setBulkFolderSubSheet(null)}>
+              <Text style={bs.okBtnText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Bulk folder actions — rename sub-sheet */}
+      <Modal transparent animationType="fade" visible={bulkFolderSubSheet === 'rename'} onRequestClose={() => { setBulkFolderSubSheet(null); setBulkRenameText(''); }}>
+        <KeyboardAvoidingView style={bs.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setBulkFolderSubSheet(null); setBulkRenameText(''); }} />
+          <View style={bs.renameCard}>
+            <Text style={bs.renameTitle}>Rename {selectedFolderIds.size} Folders</Text>
+            <TextInput
+              style={bs.renameInput}
+              value={bulkRenameText}
+              onChangeText={setBulkRenameText}
+              placeholder="New name"
+              placeholderTextColor="#555"
+              maxLength={50}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleBulkRenameSubmit}
+            />
+            <View style={bs.renameButtons}>
+              <TouchableOpacity style={bs.renameCancelBtn} onPress={() => { setBulkFolderSubSheet(null); setBulkRenameText(''); }}>
+                <Text style={bs.renameCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[bs.renameSaveBtn, !bulkRenameText.trim() && bs.renameSaveBtnDisabled]}
+                onPress={handleBulkRenameSubmit}
+                disabled={!bulkRenameText.trim()}
+              >
+                <Text style={bs.renameSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Bulk folder actions — main sheet */}
+      <Modal transparent animationType="slide" visible={showBulkFolderSheet} onRequestClose={() => setShowBulkFolderSheet(false)}>
+        <TouchableOpacity style={bs.backdrop} activeOpacity={1} onPress={() => setShowBulkFolderSheet(false)}>
+          <View style={bs.sheet}>
+            <View style={bs.handle} />
+            <Text style={bs.subtitle}>{selectedFolderIds.size} folders selected</Text>
+            <TouchableOpacity style={bs.row} onPress={() => { setShowBulkFolderSheet(false); setBulkRenameText(''); setBulkFolderSubSheet('rename'); }}>
+              <Text style={bs.rowIcon}>✏️</Text>
+              <Text style={bs.rowLabel}>Rename</Text>
+            </TouchableOpacity>
+            <View style={bs.divider} />
+            <TouchableOpacity style={bs.row} onPress={() => { handleBulkRemoveCover(); }}>
+              <Text style={bs.rowIcon}>🖼️</Text>
+              <Text style={bs.rowLabel}>Remove Album Cover</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={bs.cancelRow} onPress={() => setShowBulkFolderSheet(false)}>
+              <Text style={bs.cancelRowText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <CreateFolderModal
         visible={showCreate}
+        defaultName={nextUntitledName()}
         onCreate={handleCreateFolder}
         onCancel={() => setShowCreate(false)}
       />
 
       <FolderActionsSheet
         folder={activeFolder}
-        onClose={() => setActiveFolder(null)}
-        onDelete={(folder) => setFolderToDelete(folder)}
+        onClose={() => { setActiveFolder(null); exitSelectMode(); }}
       />
 
       <ConfirmDialog
@@ -327,10 +509,20 @@ const styles = StyleSheet.create({
     color: '#0a84ff',
     fontSize: 17,
   },
-  selectAllText: {
+  menuIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#2c2c2e',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuIconText: {
     color: '#0a84ff',
-    fontSize: 17,
-    textAlign: 'right',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginTop: -2,
   },
   lockBtn: {
     padding: 8,
@@ -363,6 +555,31 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
   },
+  selectionBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    backgroundColor: '#1c1c1e',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#333',
+    paddingBottom: 28,
+  },
+  selectionBarBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 3,
+  },
+  selectionBarIcon: { fontSize: 22 },
+  selectionBarLabel: { color: '#fff', fontSize: 11, fontWeight: '500' },
+  selectionBarLabelDanger: { color: '#ff3b30' },
+  selectionBarDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: '#333',
+    marginVertical: 8,
+  },
   fab: {
     position: 'absolute',
     right: 24,
@@ -384,32 +601,36 @@ const styles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 30,
   },
-  actionBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    backgroundColor: '#1c1c1e',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#333',
-    paddingBottom: 28,
-  },
-  actionBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 14,
-    gap: 4,
-  },
-  actionIcon: {
-    fontSize: 22,
-  },
-  actionText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  deleteText: {
-    color: '#ff3b30',
-  },
+});
+
+const bs = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#1c1c1e', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 36 },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#444', alignSelf: 'center', marginTop: 10, marginBottom: 12 },
+  subtitle: { color: '#888', fontSize: 13, textAlign: 'center', marginBottom: 8, paddingHorizontal: 24 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 14 },
+  rowIcon: { fontSize: 20, width: 28 },
+  rowLabel: { color: '#fff', fontSize: 16 },
+  rowLabelDanger: { color: '#ff3b30' },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#333', marginHorizontal: 20 },
+  cancelRow: { marginTop: 8, marginHorizontal: 16, backgroundColor: '#2c2c2e', borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
+  cancelRowText: { color: '#0a84ff', fontSize: 16, fontWeight: '600' },
+  // Details card
+  detailsCard: { backgroundColor: '#1c1c1e', borderRadius: 16, marginHorizontal: 32, padding: 24, alignSelf: 'center', width: '80%' },
+  detailsTitle: { color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 20 },
+  detailsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#333' },
+  detailsLabel: { color: '#888', fontSize: 15 },
+  detailsValue: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  okBtn: { marginTop: 20, backgroundColor: '#0a84ff', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  okBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  // Rename card
+  renameCard: { backgroundColor: '#1c1c1e', borderRadius: 16, marginHorizontal: 24, padding: 20 },
+  renameTitle: { color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+  renameInput: { backgroundColor: '#2c2c2e', color: '#fff', fontSize: 16, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16 },
+  renameButtons: { flexDirection: 'row', gap: 12 },
+  renameCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#2c2c2e', alignItems: 'center' },
+  renameCancelText: { color: '#888', fontSize: 15, fontWeight: '600' },
+  renameSaveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#0a84ff', alignItems: 'center' },
+  renameSaveBtnDisabled: { backgroundColor: '#1a4a7a' },
+  renameSaveText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

@@ -12,14 +12,15 @@ import {
   PanResponder,
   Dimensions,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
-import { Paths } from 'expo-file-system';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { useVault } from '../context/VaultContext';
 import MediaThumbnail from '../components/media/MediaThumbnail';
+import MediaActionsSheet from '../components/media/MediaActionsSheet';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { MediaItem } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -45,13 +46,17 @@ export default function FolderScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { folder } = route.params;
-  const { mediaByFolder, deleteMediaBatch } = useVault();
+  const { mediaByFolder, deleteMediaBatch, folders, moveMediaBatch } = useVault();
   const { importMedia, isImporting } = useMediaImport(folder.id);
 
   // ── Select mode ────────────────────────────────────────────────────────────
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
+  const [showBulkSheet, setShowBulkSheet] = useState(false);
+  const [showBulkDetails, setShowBulkDetails] = useState(false);
+  const [showBulkMove, setShowBulkMove] = useState(false);
 
   // ── Sort / filter ──────────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>('dateDesc');
@@ -90,18 +95,24 @@ export default function FolderScreen() {
   const listWrapperRef = useRef<View>(null);
   const swipeAnchorState = useRef<boolean>(false);
   const swipedIds = useRef<Set<string>>(new Set());
+  const pendingSwipeItemId = useRef<string | null>(null);
 
-  useEffect(() => { isSelectingRef.current = isSelecting; }, [isSelecting]);
   useEffect(() => { displayedItemsRef.current = displayedItems; }, [displayedItems]);
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
 
   // ── Select helpers ─────────────────────────────────────────────────────────
   const enterSelectMode = useCallback((item: MediaItem) => {
+    isSelectingRef.current = true;
+    pendingSwipeItemId.current = item.id;
     setIsSelecting(true);
     setSelectedIds(new Set([item.id]));
   }, []);
 
-  const exitSelectMode = () => { setIsSelecting(false); setSelectedIds(new Set()); };
+  const exitSelectMode = () => {
+    isSelectingRef.current = false;
+    setIsSelecting(false);
+    setSelectedIds(new Set());
+  };
 
   const toggleSelect = (item: MediaItem) => {
     setSelectedIds((prev) => {
@@ -133,13 +144,29 @@ export default function FolderScreen() {
 
   const swipePan = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => isSelectingRef.current,
+      // Never block the initial touch — let cards handle taps/long-presses normally.
+      onStartShouldSetPanResponder: () => false,
+      // Once a child (TouchableOpacity) owns the touch and the finger moves,
+      // steal the gesture if we're in select mode.
       onMoveShouldSetPanResponder: () => isSelectingRef.current,
       onPanResponderGrant: (evt) => {
-        swipedIds.current = new Set();
+        // If this gesture was triggered by a long-press, seed swipedIds with the
+        // already-selected item so we don't accidentally toggle it off.
+        const seedId = pendingSwipeItemId.current;
+        pendingSwipeItemId.current = null;
+        swipedIds.current = new Set(seedId ? [seedId] : []);
+        // Always add when initiating from long-press; for in-progress swipes,
+        // anchor on whether the touched item was already selected.
         const { pageX, pageY } = evt.nativeEvent;
         const item = getItemAtPos(pageX, pageY);
-        if (!item) return;
+        if (!item) {
+          swipeAnchorState.current = true;
+          return;
+        }
+        if (swipedIds.current.has(item.id)) {
+          swipeAnchorState.current = true;
+          return;
+        }
         const isCurrentlySelected = selectedIdsRef.current.has(item.id);
         swipeAnchorState.current = !isCurrentlySelected;
         swipedIds.current.add(item.id);
@@ -201,6 +228,20 @@ export default function FolderScreen() {
 
   const handleDeleteSelected = async () => { await deleteMediaBatch(selectedItems); exitSelectMode(); };
 
+  const handleMenuBtnPress = () => {
+    if (selectedIds.size === 1) {
+      setActiveMedia(rawItems.find((m) => selectedIds.has(m.id)) ?? null);
+    } else {
+      setShowBulkSheet(true);
+    }
+  };
+
+  const handleBulkMove = async (targetFolderId: string) => {
+    setShowBulkMove(false);
+    await moveMediaBatch(selectedItems, targetFolderId);
+    exitSelectMode();
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -211,12 +252,11 @@ export default function FolderScreen() {
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{selectedIds.size} selected</Text>
-            <TouchableOpacity
-              onPress={() => setSelectedIds(selectedIds.size === rawItems.length ? new Set() : new Set(rawItems.map((m) => m.id)))}
-              style={styles.headerRight}
-            >
-              <Text style={styles.selectAllText}>{selectedIds.size === rawItems.length ? 'None' : 'All'}</Text>
-            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={styles.menuIconBtn} onPress={handleMenuBtnPress}>
+                <Text style={styles.menuIconText}>···</Text>
+              </TouchableOpacity>
+            </View>
           </>
         ) : (
           <>
@@ -283,6 +323,7 @@ export default function FolderScreen() {
       <View
         ref={listWrapperRef}
         style={{ flex: 1 }}
+        {...swipePan.panHandlers}
         onLayout={() => {
           listWrapperRef.current?.measure((_x, _y, _w, _h, _px, py) => {
             listTop.current = py;
@@ -315,10 +356,6 @@ export default function FolderScreen() {
           }
         />
 
-        {/* Swipe-to-select overlay */}
-        {isSelecting && (
-          <View style={StyleSheet.absoluteFill} {...swipePan.panHandlers} />
-        )}
       </View>
 
       {/* Selection action bar */}
@@ -392,6 +429,85 @@ export default function FolderScreen() {
         onConfirm={async () => { setShowDeleteConfirm(false); await handleDeleteSelected(); }}
         onCancel={() => setShowDeleteConfirm(false)}
       />
+
+      <MediaActionsSheet item={activeMedia} onClose={() => { setActiveMedia(null); exitSelectMode(); }} />
+
+      {/* ── Bulk action sheet ───────────────────────────────────────────────── */}
+      <Modal transparent animationType="slide" visible={showBulkSheet} onRequestClose={() => setShowBulkSheet(false)}>
+        <TouchableOpacity style={bs.backdrop} activeOpacity={1} onPress={() => setShowBulkSheet(false)}>
+          <View style={bs.sheet}>
+            <View style={bs.handle} />
+            <Text style={bs.subtitle}>{selectedIds.size} items selected</Text>
+
+            <TouchableOpacity style={bs.row} onPress={() => { setShowBulkSheet(false); setShowBulkDetails(true); }}>
+              <Text style={bs.icon}>ℹ️</Text><Text style={bs.label}>Details</Text>
+            </TouchableOpacity>
+            <View style={bs.divider} />
+            <TouchableOpacity style={bs.row} onPress={() => { setShowBulkSheet(false); setShowBulkMove(true); }}>
+              <Text style={bs.icon}>📁</Text><Text style={bs.label}>Move to Folder</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={bs.cancelRow} onPress={() => setShowBulkSheet(false)}>
+              <Text style={bs.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Bulk details modal ──────────────────────────────────────────────── */}
+      <Modal transparent animationType="fade" visible={showBulkDetails} onRequestClose={() => setShowBulkDetails(false)}>
+        <TouchableOpacity style={bs.backdrop} activeOpacity={1} onPress={() => setShowBulkDetails(false)}>
+          <View style={bs.detailsCard}>
+            <Text style={bs.detailsTitle}>{selectedIds.size} Items Selected</Text>
+            <View style={bs.detailsRow}>
+              <Text style={bs.detailsLabel}>Photos</Text>
+              <Text style={bs.detailsValue}>{selectedItems.filter((m) => m.mediaType === 'photo').length}</Text>
+            </View>
+            <View style={bs.detailsRow}>
+              <Text style={bs.detailsLabel}>Videos</Text>
+              <Text style={bs.detailsValue}>{selectedItems.filter((m) => m.mediaType === 'video').length}</Text>
+            </View>
+            <View style={bs.detailsRow}>
+              <Text style={bs.detailsLabel}>Total Size</Text>
+              <Text style={bs.detailsValue}>{formatBytes(selectedItems.reduce((s, m) => s + (m.fileSizeBytes ?? 0), 0))}</Text>
+            </View>
+            <TouchableOpacity style={bs.okBtn} onPress={() => setShowBulkDetails(false)}>
+              <Text style={bs.okBtnText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Bulk move modal ─────────────────────────────────────────────────── */}
+      <Modal transparent animationType="slide" visible={showBulkMove} onRequestClose={() => setShowBulkMove(false)}>
+        <TouchableOpacity style={bs.backdrop} activeOpacity={1} onPress={() => setShowBulkMove(false)}>
+          <View style={bs.sheet}>
+            <View style={bs.handle} />
+            <Text style={bs.subtitle}>Move {selectedIds.size} items to…</Text>
+            {folders.filter((f) => f.id !== folder.id).length === 0 ? (
+              <Text style={bs.emptyText}>No other folders available.</Text>
+            ) : (
+              <FlatList
+                data={folders.filter((f) => f.id !== folder.id)}
+                keyExtractor={(f) => f.id}
+                scrollEnabled={folders.length > 6}
+                style={{ maxHeight: 320 }}
+                renderItem={({ item: f }) => (
+                  <TouchableOpacity style={bs.folderRow} onPress={() => handleBulkMove(f.id)}>
+                    <Text style={bs.folderIcon}>🗂️</Text>
+                    <Text style={bs.folderName} numberOfLines={1}>{f.name}</Text>
+                    <Text style={bs.folderCount}>{f.itemCount}</Text>
+                  </TouchableOpacity>
+                )}
+                ItemSeparatorComponent={() => <View style={bs.divider} />}
+              />
+            )}
+            <TouchableOpacity style={bs.cancelRow} onPress={() => setShowBulkMove(false)}>
+              <Text style={bs.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -436,7 +552,21 @@ const styles = StyleSheet.create({
   headerRight: { width: 72, flexDirection: 'row', justifyContent: 'flex-end', gap: 4 },
   backText: { color: '#0a84ff', fontSize: 17 },
   cancelText: { color: '#0a84ff', fontSize: 17 },
-  selectAllText: { color: '#0a84ff', fontSize: 17, textAlign: 'right' },
+  menuIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#2c2c2e',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuIconText: {
+    color: '#0a84ff',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginTop: -2,
+  },
   headerTitle: { flex: 1, color: '#fff', fontSize: 17, fontWeight: '600', textAlign: 'center' },
   headerIconBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#1c1c1e', justifyContent: 'center', alignItems: 'center' },
   headerIcon: { color: '#0a84ff', fontSize: 16 },
@@ -496,6 +626,46 @@ const thumbStyles = StyleSheet.create({
   },
   checkSelected: { backgroundColor: '#0a84ff', borderColor: '#0a84ff' },
   checkMark: { color: '#fff', fontSize: 13, fontWeight: '700' },
+});
+
+// ─── Bulk action helpers ─────────────────────────────────────────────────────────
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+const bs = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#1c1c1e', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 36 },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#444', alignSelf: 'center', marginTop: 10, marginBottom: 12 },
+  subtitle: { color: '#888', fontSize: 13, textAlign: 'center', marginBottom: 8, paddingHorizontal: 24 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15, gap: 14 },
+  icon: { fontSize: 20, width: 28 },
+  label: { color: '#fff', fontSize: 16 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#333', marginHorizontal: 20 },
+  cancelRow: { marginTop: 8, marginHorizontal: 16, backgroundColor: '#2c2c2e', borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
+  cancelText: { color: '#0a84ff', fontSize: 16, fontWeight: '600' },
+  emptyText: { color: '#666', fontSize: 14, textAlign: 'center', padding: 24 },
+  folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
+  folderIcon: { fontSize: 20 },
+  folderName: { flex: 1, color: '#fff', fontSize: 16 },
+  folderCount: { color: '#666', fontSize: 14 },
+  detailsCard: {
+    backgroundColor: '#1c1c1e', borderRadius: 16, marginHorizontal: 32, padding: 24,
+    alignSelf: 'center', width: '80%',
+  },
+  detailsTitle: { color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 20 },
+  detailsRow: {
+    flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#333',
+  },
+  detailsLabel: { color: '#888', fontSize: 14 },
+  detailsValue: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  okBtn: { marginTop: 20, backgroundColor: '#0a84ff', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  okBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
 
 // ─── Sort / filter sheet styles ─────────────────────────────────────────────────

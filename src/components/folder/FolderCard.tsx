@@ -9,10 +9,9 @@ interface FolderCardProps {
   onPress: () => void;
   onLongPress: () => void;
   selected?: boolean;
-  onMenuPress?: () => void;
 }
 
-export default function FolderCard({ folder, onPress, onLongPress, selected, onMenuPress }: FolderCardProps) {
+export default function FolderCard({ folder, onPress, onLongPress, selected }: FolderCardProps) {
   const inSelectMode = selected !== undefined;
 
   return (
@@ -24,7 +23,7 @@ export default function FolderCard({ folder, onPress, onLongPress, selected, onM
     >
       <View style={styles.thumbnail}>
         {folder.coverUri ? (
-          <Image source={{ uri: folder.coverUri }} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: folder.coverUri }} style={styles.image} resizeMode="cover" contextMenuHidden />
         ) : (
           <View style={styles.placeholder}>
             <Text style={styles.folderIcon}>🗂️</Text>
@@ -38,17 +37,6 @@ export default function FolderCard({ folder, onPress, onLongPress, selected, onM
               {selected && <Text style={styles.checkboxMark}>✓</Text>}
             </View>
           </View>
-        )}
-
-        {/* Menu button — shown only when NOT in select mode */}
-        {!inSelectMode && onMenuPress && (
-          <TouchableOpacity
-            style={styles.menuBtn}
-            onPress={(e) => { e.stopPropagation(); onMenuPress(); }}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={styles.menuBtnText}>···</Text>
-          </TouchableOpacity>
         )}
       </View>
 
@@ -100,7 +88,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  // Checkbox (top-right of thumbnail)
   checkboxContainer: {
     position: 'absolute',
     top: 8,
@@ -125,22 +112,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '700',
-  },
-  // Menu button (top-right of thumbnail, only when not in select mode)
-  menuBtn: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    zIndex: 10,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  menuBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 1,
   },
 });

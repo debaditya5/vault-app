@@ -19,9 +19,6 @@ import { setStatusBarHidden, setStatusBarTranslucent } from 'expo-status-bar';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import * as FileSystem from 'expo-file-system';
-import { Paths } from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
 import { useVault } from '../context/VaultContext';
 import { useSettings } from '../context/SettingsContext';
 import { MediaItem } from '../types';
@@ -575,43 +572,6 @@ export default function MediaViewerScreen() {
     catch { Alert.alert('Share failed', 'Could not share this file.'); }
   };
 
-  const handleUnhide = async () => {
-    setMenuSheet('closed');
-    let tempUri: string | null = null;
-    try {
-      if (Platform.OS === 'ios') {
-        // iOS requires explicit photo library permission
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
-          return;
-        }
-      }
-      // Android 10+: no permission needed for MediaStore inserts — skip the check entirely.
-      // Android 9-: createAssetAsync will throw a permission error if WRITE_EXTERNAL_STORAGE is absent.
-
-      let uriToSave = currentItem.vaultUri;
-      if (Platform.OS === 'android') {
-        // MediaStore cannot read from the app's private internal storage — copy to cache first
-        tempUri = Paths.cache.uri + currentItem.id + '_' + currentItem.fileName;
-        console.log('[Unhide] Copying to cache:', tempUri);
-        await FileSystem.copyAsync({ from: currentItem.vaultUri, to: tempUri });
-        uriToSave = tempUri;
-        console.log('[Unhide] Cached. Saving to gallery...');
-      }
-
-      await MediaLibrary.createAssetAsync(uriToSave);
-      console.log('[Unhide] Saved to gallery successfully.');
-    } catch (e: any) {
-      console.log('[Unhide] Error:', e);
-      if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-      Alert.alert('Save Failed', e?.message ?? String(e));
-      return;
-    }
-    if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    await removeCurrentItem();
-  };
-
   const handleRotate = async () => {
     setMenuSheet('closed');
     const newRotation = ((currentItem.rotation ?? 0) + 90) % 360;
@@ -729,8 +689,6 @@ export default function MediaViewerScreen() {
             <MenuRow icon="🖼️" label="Set as Album Cover" onPress={handleSetCover} />
             <ms.Divider />
             <MenuRow icon="📤" label="Share" onPress={handleShare} />
-            <ms.Divider />
-            <MenuRow icon="👁" label="Unhide" onPress={handleUnhide} />
             <ms.Divider />
             <MenuRow icon="ℹ️" label="Details" onPress={() => setMenuSheet('details')} />
             <ms.Divider />

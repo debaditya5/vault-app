@@ -9,11 +9,14 @@ interface VaultContextType {
   isLoading: boolean;
   addFolder: (folder: Folder) => Promise<void>;
   deleteFolder: (folderId: string) => Promise<void>;
+  deleteFolderBatch: (folderIds: string[]) => Promise<void>;
   renameFolder: (folderId: string, newName: string) => Promise<void>;
   removeFolderCover: (folderId: string) => Promise<void>;
+  removeFolderCoverBatch: (folderIds: string[]) => Promise<void>;
   renameMedia: (item: MediaItem, newName: string) => Promise<void>;
   rotateMedia: (item: MediaItem) => Promise<void>;
   moveMedia: (item: MediaItem, targetFolderId: string) => Promise<void>;
+  moveMediaBatch: (items: MediaItem[], targetFolderId: string) => Promise<void>;
   setFolderCover: (folderId: string, uri: string) => Promise<void>;
   addMediaBatch: (items: MediaItem[]) => Promise<void>;
   deleteMedia: (item: MediaItem) => Promise<void>;
@@ -57,6 +60,23 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const deleteFolderBatch = async (folderIds: string[]) => {
+    if (folderIds.length === 0) return;
+    for (const id of folderIds) {
+      await fileService.deleteFolderContents(id);
+      await metadataService.removeFolderMetadata(id);
+    }
+    const idSet = new Set(folderIds);
+    const updated = folders.filter((f) => !idSet.has(f.id));
+    await metadataService.saveFolders(updated);
+    setFolders(updated);
+    setMediaByFolder((prev) => {
+      const next = { ...prev };
+      for (const id of folderIds) delete next[id];
+      return next;
+    });
+  };
+
   const renameFolder = async (folderId: string, newName: string) => {
     const updated = folders.map((f) => f.id === folderId ? { ...f, name: newName } : f);
     await metadataService.saveFolders(updated);
@@ -65,6 +85,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const removeFolderCover = async (folderId: string) => {
     const updated = folders.map((f) => f.id === folderId ? { ...f, coverUri: undefined } : f);
+    await metadataService.saveFolders(updated);
+    setFolders(updated);
+  };
+
+  const removeFolderCoverBatch = async (folderIds: string[]) => {
+    const idSet = new Set(folderIds);
+    const updated = folders.map((f) => idSet.has(f.id) ? { ...f, coverUri: undefined } : f);
     await metadataService.saveFolders(updated);
     setFolders(updated);
   };
@@ -82,6 +109,41 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const updated = current.map((m) => m.id === item.id ? { ...m, rotation: newRotation } : m);
     await metadataService.saveMedia(item.folderId, updated);
     setMediaByFolder((prev) => ({ ...prev, [item.folderId]: updated }));
+  };
+
+  const moveMediaBatch = async (items: MediaItem[], targetFolderId: string) => {
+    if (items.length === 0) return;
+    const sourceFolderId = items[0].folderId;
+
+    // Move all files first
+    const movedItems: MediaItem[] = [];
+    for (const item of items) {
+      const ext = item.fileName.split('.').pop() ?? 'jpg';
+      const newUri = await fileService.moveToFolder(item.vaultUri, targetFolderId, item.id, ext);
+      movedItems.push({ ...item, folderId: targetFolderId, vaultUri: newUri });
+    }
+
+    // Compute updated lists in one shot using current state
+    const movedIds = new Set(items.map((m) => m.id));
+    const sourceItems = (mediaByFolder[sourceFolderId] ?? []).filter((m) => !movedIds.has(m.id));
+    const targetItems = [...(mediaByFolder[targetFolderId] ?? []), ...movedItems];
+
+    await metadataService.saveMedia(sourceFolderId, sourceItems);
+    await metadataService.saveMedia(targetFolderId, targetItems);
+    setMediaByFolder((prev) => ({ ...prev, [sourceFolderId]: sourceItems, [targetFolderId]: targetItems }));
+
+    const movedUris = new Set(items.map((m) => m.vaultUri));
+    const updatedFolders = folders.map((f) => {
+      if (f.id === sourceFolderId) {
+        return { ...f, itemCount: sourceItems.length, coverUri: f.coverUri && movedUris.has(f.coverUri) ? undefined : f.coverUri };
+      }
+      if (f.id === targetFolderId) {
+        return { ...f, itemCount: targetItems.length };
+      }
+      return f;
+    });
+    await metadataService.saveFolders(updatedFolders);
+    setFolders(updatedFolders);
   };
 
   const moveMedia = async (item: MediaItem, targetFolderId: string) => {
@@ -183,7 +245,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   return (
     <VaultContext.Provider
-      value={{ folders, mediaByFolder, isLoading, addFolder, deleteFolder, renameFolder, removeFolderCover, renameMedia, rotateMedia, moveMedia, setFolderCover, addMediaBatch, deleteMedia, deleteMediaBatch }}
+      value={{ folders, mediaByFolder, isLoading, addFolder, deleteFolder, deleteFolderBatch, renameFolder, removeFolderCover, removeFolderCoverBatch, renameMedia, rotateMedia, moveMedia, moveMediaBatch, setFolderCover, addMediaBatch, deleteMedia, deleteMediaBatch }}
     >
       {children}
     </VaultContext.Provider>

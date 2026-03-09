@@ -10,11 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   FlatList,
-  Share,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
-import { Paths } from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
 import { MediaItem } from '../../types';
 import { useVault } from '../../context/VaultContext';
 
@@ -54,41 +50,6 @@ export default function MediaActionsSheet({ item, onClose }: Props) {
   const otherFolders = folders.filter((f) => f.id !== item?.folderId);
 
   const handleClose = () => { setSheet('menu'); setNewName(''); onClose(); };
-
-  const handleShare = async () => {
-    if (!item) return;
-    try { await Share.share({ url: item.vaultUri, title: item.fileName }); }
-    catch { Alert.alert('Share failed', 'Could not share this file.'); }
-    handleClose();
-  };
-
-  const handleUnhide = async () => {
-    if (!item) return;
-    if (Platform.OS === 'ios') {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
-        return;
-      }
-    }
-    let tempUri: string | null = null;
-    try {
-      let uriToSave = item.vaultUri;
-      if (Platform.OS === 'android') {
-        tempUri = Paths.cache.uri + item.id + '_' + item.fileName;
-        await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
-        uriToSave = tempUri;
-      }
-      await MediaLibrary.createAssetAsync(uriToSave);
-    } catch (e: any) {
-      if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-      Alert.alert('Save Failed', e?.message ?? String(e));
-      return;
-    }
-    if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    await deleteMedia(item);
-    handleClose();
-  };
 
   const handleRenameSubmit = async () => {
     const trimmed = newName.trim();
@@ -219,10 +180,6 @@ export default function MediaActionsSheet({ item, onClose }: Props) {
           <View style={s.handle} />
           <Text style={s.sheetSubtitle} numberOfLines={1}>{item!.fileName}</Text>
 
-          <SheetRow icon="📤" label="Share" onPress={handleShare} />
-          <View style={s.divider} />
-          <SheetRow icon="👁" label="Unhide" onPress={handleUnhide} />
-          <View style={s.divider} />
           <SheetRow icon="✏️" label="Rename" onPress={() => { setNewName(splitFilename(item!.fileName).name); setSheet('rename'); }} />
           <View style={s.divider} />
           <SheetRow icon="ℹ️" label="Details" onPress={() => setSheet('details')} />

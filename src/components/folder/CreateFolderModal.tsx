@@ -12,12 +12,18 @@ import {
 
 interface CreateFolderModalProps {
   visible: boolean;
+  defaultName: string;
   onCreate: (name: string) => void;
   onCancel: () => void;
 }
 
-export default function CreateFolderModal({ visible, onCreate, onCancel }: CreateFolderModalProps) {
-  const [name, setName] = useState('');
+export default function CreateFolderModal({ visible, defaultName, onCreate, onCancel }: CreateFolderModalProps) {
+  const [name, setName] = useState(defaultName);
+
+  // Sync the pre-filled name whenever the modal opens with a new default.
+  React.useEffect(() => {
+    if (visible) setName(defaultName);
+  }, [visible, defaultName]);
 
   const handleCreate = () => {
     const trimmed = name.trim();
@@ -33,37 +39,43 @@ export default function CreateFolderModal({ visible, onCreate, onCancel }: Creat
 
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={handleCancel}>
+      {/* KAV must be flex:1 at root so it can correctly measure keyboard height */}
       <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.dialog}>
-          <Text style={styles.title}>New Folder</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Folder name"
-            placeholderTextColor="#666"
-            value={name}
-            onChangeText={(t) => setName(t.slice(0, 50))}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={handleCreate}
-            maxLength={50}
-          />
-          <Text style={styles.charCount}>{name.length}/50</Text>
-          <View style={styles.buttons}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.createBtn, !name.trim() && styles.disabledBtn]}
-              onPress={handleCreate}
-              disabled={!name.trim()}
-            >
-              <Text style={styles.createText}>Create</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        {/* Backdrop — tapping outside dismisses */}
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={handleCancel}>
+          {/* Inner touchable absorbs taps so they don't bubble to the backdrop */}
+          <TouchableOpacity activeOpacity={1} style={styles.dialog} onPress={() => {}}>
+            <Text style={styles.title}>New Folder</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Folder name"
+              placeholderTextColor="#666"
+              value={name}
+              onChangeText={(t) => setName(t.slice(0, 50))}
+              autoFocus
+              selectTextOnFocus
+              returnKeyType="done"
+              onSubmitEditing={handleCreate}
+              maxLength={50}
+            />
+            <Text style={styles.charCount}>{name.length}/50</Text>
+            <View style={styles.buttons}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.createBtn, !name.trim() && styles.disabledBtn]}
+                onPress={handleCreate}
+                disabled={!name.trim()}
+              >
+                <Text style={styles.createText}>Create</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </KeyboardAvoidingView>
     </Modal>
   );
