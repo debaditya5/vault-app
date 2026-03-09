@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   FlatList,
@@ -8,14 +8,18 @@ import {
   Alert,
   Modal,
   TextInput,
+  Platform,
+  PanResponder,
+  Dimensions,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
+import { Paths } from 'expo-file-system';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import * as MediaLibrary from 'expo-media-library';
 import { useVault } from '../context/VaultContext';
 import MediaThumbnail from '../components/media/MediaThumbnail';
-import MediaActionsSheet from '../components/media/MediaActionsSheet';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { MediaItem } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -35,6 +39,8 @@ const SORT_LABELS: Record<SortKey, string> = {
   nameDesc: 'Name Z → A',
 };
 
+const ITEM_SIZE = Dimensions.get('window').width / 3;
+
 export default function FolderScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
@@ -46,9 +52,6 @@ export default function FolderScreen() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  // ── Media action sheet ─────────────────────────────────────────────────────
-  const [activeItem, setActiveItem] = useState<MediaItem | null>(null);
 
   // ── Sort / filter ──────────────────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey>('dateDesc');
@@ -78,6 +81,20 @@ export default function FolderScreen() {
 
   const selectedItems = rawItems.filter((m) => selectedIds.has(m.id));
 
+  // ── Stable refs for PanResponder ───────────────────────────────────────────
+  const isSelectingRef = useRef(isSelecting);
+  const displayedItemsRef = useRef(displayedItems);
+  const selectedIdsRef = useRef(selectedIds);
+  const listTop = useRef(0);
+  const listScrollY = useRef(0);
+  const listWrapperRef = useRef<View>(null);
+  const swipeAnchorState = useRef<boolean>(false);
+  const swipedIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => { isSelectingRef.current = isSelecting; }, [isSelecting]);
+  useEffect(() => { displayedItemsRef.current = displayedItems; }, [displayedItems]);
+  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+
   // ── Select helpers ─────────────────────────────────────────────────────────
   const enterSelectMode = useCallback((item: MediaItem) => {
     setIsSelecting(true);
@@ -102,18 +119,83 @@ export default function FolderScreen() {
 
   const handleThumbnailLongPress = (item: MediaItem) => {
     if (isSelecting) { toggleSelect(item); return; }
-    setActiveItem(item);
+    enterSelectMode(item);
   };
+
+  // ── PanResponder for swipe-to-select ──────────────────────────────────────
+  const getItemAtPos = (pageX: number, pageY: number): MediaItem | null => {
+    const relY = pageY - listTop.current + listScrollY.current;
+    const col = Math.min(2, Math.max(0, Math.floor(pageX / ITEM_SIZE)));
+    const row = Math.floor(relY / ITEM_SIZE);
+    const idx = row * 3 + col;
+    return displayedItemsRef.current[idx] ?? null;
+  };
+
+  const swipePan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => isSelectingRef.current,
+      onMoveShouldSetPanResponder: () => isSelectingRef.current,
+      onPanResponderGrant: (evt) => {
+        swipedIds.current = new Set();
+        const { pageX, pageY } = evt.nativeEvent;
+        const item = getItemAtPos(pageX, pageY);
+        if (!item) return;
+        const isCurrentlySelected = selectedIdsRef.current.has(item.id);
+        swipeAnchorState.current = !isCurrentlySelected;
+        swipedIds.current.add(item.id);
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          swipeAnchorState.current ? next.add(item.id) : next.delete(item.id);
+          return next;
+        });
+      },
+      onPanResponderMove: (evt) => {
+        const { pageX, pageY } = evt.nativeEvent;
+        const item = getItemAtPos(pageX, pageY);
+        if (!item) return;
+        if (swipedIds.current.has(item.id)) return;
+        swipedIds.current.add(item.id);
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          swipeAnchorState.current ? next.add(item.id) : next.delete(item.id);
+          return next;
+        });
+      },
+      onPanResponderRelease: () => { swipedIds.current = new Set(); },
+      onPanResponderTerminate: () => { swipedIds.current = new Set(); },
+    })
+  ).current;
 
   // ── Bulk actions ───────────────────────────────────────────────────────────
   const handleUnhide = async () => {
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Please allow access to save media to your gallery.'); return; }
-    const toDelete: MediaItem[] = [];
-    for (const item of selectedItems) {
-      try { await MediaLibrary.saveToLibraryAsync(item.vaultUri); toDelete.push(item); } catch { /* skip */ }
+    if (Platform.OS === 'ios') {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission needed', 'Please allow photo library access in Settings.'); return; }
     }
-    if (toDelete.length > 0) await deleteMediaBatch(toDelete);
+    const toDelete: MediaItem[] = [];
+    let lastError = '';
+    for (const item of selectedItems) {
+      let tempUri: string | null = null;
+      try {
+        let uriToSave = item.vaultUri;
+        if (Platform.OS === 'android') {
+          tempUri = Paths.cache.uri + item.id + '_' + item.fileName;
+          await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
+          uriToSave = tempUri;
+        }
+        await MediaLibrary.createAssetAsync(uriToSave);
+        toDelete.push(item);
+      } catch (e: any) {
+        lastError = e?.message ?? String(e);
+      } finally {
+        if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+      }
+    }
+    if (toDelete.length > 0) {
+      await deleteMediaBatch(toDelete);
+    } else if (lastError) {
+      Alert.alert('Save Failed', lastError);
+    }
     exitSelectMode();
   };
 
@@ -198,28 +280,46 @@ export default function FolderScreen() {
       )}
 
       {/* Grid */}
-      <FlatList
-        data={displayedItems}
-        keyExtractor={(item) => item.id}
-        numColumns={3}
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <SelectableMediaThumbnail
-            item={item}
-            isSelecting={isSelecting}
-            isSelected={selectedIds.has(item.id)}
-            onPress={() => handleThumbnailPress(item)}
-            onLongPress={() => handleThumbnailLongPress(item)}
-          />
+      <View
+        ref={listWrapperRef}
+        style={{ flex: 1 }}
+        onLayout={() => {
+          listWrapperRef.current?.measure((_x, _y, _w, _h, _px, py) => {
+            listTop.current = py;
+          });
+        }}
+      >
+        <FlatList
+          data={displayedItems}
+          keyExtractor={(item) => item.id}
+          numColumns={3}
+          contentContainerStyle={styles.list}
+          scrollEnabled={!isSelecting}
+          onScroll={(e) => { listScrollY.current = e.nativeEvent.contentOffset.y; }}
+          scrollEventThrottle={16}
+          renderItem={({ item }) => (
+            <SelectableMediaThumbnail
+              item={item}
+              isSelecting={isSelecting}
+              isSelected={selectedIds.has(item.id)}
+              onPress={() => handleThumbnailPress(item)}
+              onLongPress={() => handleThumbnailLongPress(item)}
+            />
+          )}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>📷</Text>
+              <Text style={styles.emptyText}>{nameFilter || typeFilter !== 'all' ? 'No results' : 'No media yet'}</Text>
+              <Text style={styles.emptySubtext}>{nameFilter || typeFilter !== 'all' ? 'Try a different search or filter' : 'Tap + to import photos or videos'}</Text>
+            </View>
+          }
+        />
+
+        {/* Swipe-to-select overlay */}
+        {isSelecting && (
+          <View style={StyleSheet.absoluteFill} {...swipePan.panHandlers} />
         )}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📷</Text>
-            <Text style={styles.emptyText}>{nameFilter || typeFilter !== 'all' ? 'No results' : 'No media yet'}</Text>
-            <Text style={styles.emptySubtext}>{nameFilter || typeFilter !== 'all' ? 'Try a different search or filter' : 'Tap + to import photos or videos'}</Text>
-          </View>
-        }
-      />
+      </View>
 
       {/* Selection action bar */}
       {isSelecting && selectedIds.size > 0 && (
@@ -285,12 +385,6 @@ export default function FolderScreen() {
         </TouchableOpacity>
       </Modal>
 
-      <MediaActionsSheet
-        item={activeItem}
-        onClose={() => setActiveItem(null)}
-        onEnterSelect={(item) => enterSelectMode(item)}
-      />
-
       <ConfirmDialog
         visible={showDeleteConfirm}
         title="Delete Items"
@@ -346,7 +440,6 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, color: '#fff', fontSize: 17, fontWeight: '600', textAlign: 'center' },
   headerIconBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#1c1c1e', justifyContent: 'center', alignItems: 'center' },
   headerIcon: { color: '#0a84ff', fontSize: 16 },
-  headerIconActive: { color: '#fff' },
   filterDot: { position: 'absolute', top: 2, right: 2, width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#ff3b30' },
 
   // Inline filter bars

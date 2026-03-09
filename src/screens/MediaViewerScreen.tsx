@@ -13,11 +13,14 @@ import {
   Modal,
   Share,
   PanResponder,
+  Platform,
 } from 'react-native';
 import { setStatusBarHidden, setStatusBarTranslucent } from 'expo-status-bar';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import * as FileSystem from 'expo-file-system';
+import { Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { useVault } from '../context/VaultContext';
 import { useSettings } from '../context/SettingsContext';
@@ -206,69 +209,88 @@ interface VideoPageProps {
 }
 
 function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate, controlsVisible, onTap }: VideoPageProps) {
-  const [shouldPlay, setShouldPlay] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasEnded, setHasEnded] = useState(false);
-  const [videoKey, setVideoKey] = useState(0);
-  const videoRef = useRef<Video>(null);
 
-  // Stop and reset when navigating away
+  // Stable refs to avoid stale closures in event listeners
+  const isCurrentRef = useRef(isCurrent);
+  useEffect(() => { isCurrentRef.current = isCurrent; }, [isCurrent]);
+  const onProgressUpdateRef = useRef(onProgressUpdate);
+  useEffect(() => { onProgressUpdateRef.current = onProgressUpdate; }, [onProgressUpdate]);
+
+  const player = useVideoPlayer(item.vaultUri, (p) => { p.loop = false; });
+
+  // Pause and reset UI when navigating away
   useEffect(() => {
     if (!isCurrent) {
-      setShouldPlay(false);
+      player.pause();
       setIsPlaying(false);
       setHasEnded(false);
       onProgressUpdate(0, 0, false);
     }
-  }, [isCurrent]);
+  }, [isCurrent]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Register seek function so parent can seek this video
+  // Register seek function so parent can call it
   useEffect(() => {
     if (isCurrent) {
-      seekFnRef.current = (ms: number) => {
-        videoRef.current?.setPositionAsync(ms);
-      };
+      seekFnRef.current = (ms: number) => { player.currentTime = ms / 1000; };
     }
-    return () => {
-      if (isCurrent) seekFnRef.current = null;
-    };
-  }, [isCurrent, seekFnRef]);
+    return () => { if (isCurrent) seekFnRef.current = null; };
+  }, [isCurrent, player, seekFnRef]);
 
-  const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (!('isLoaded' in status) || !status.isLoaded) return;
-    setIsPlaying(status.isPlaying);
-    if (isCurrent) {
-      onProgressUpdate(
-        status.positionMillis ?? 0,
-        status.durationMillis ?? 0,
-        status.isPlaying,
-      );
-    }
-    if (status.didJustFinish) {
-      setShouldPlay(false);
+  // Sync playback rate
+  useEffect(() => { player.rate = playbackRate; }, [player, playbackRate]);
+
+  // Playing / paused changes
+  useEffect(() => {
+    const sub = player.addListener('playingChange', ({ isPlaying: playing }) => {
+      setIsPlaying(playing);
+    });
+    return () => sub.remove();
+  }, [player]);
+
+  // Periodic time updates → parent seek bar
+  useEffect(() => {
+    const sub = player.addListener('timeUpdate', ({ currentTime }) => {
+      if (isCurrentRef.current) {
+        onProgressUpdateRef.current(currentTime * 1000, (player.duration ?? 0) * 1000, player.playing);
+      }
+    });
+    return () => sub.remove();
+  }, [player]);
+
+  // Duration available after load
+  useEffect(() => {
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay' && isCurrentRef.current) {
+        onProgressUpdateRef.current(player.currentTime * 1000, (player.duration ?? 0) * 1000, false);
+      }
+    });
+    return () => sub.remove();
+  }, [player]);
+
+  // End of video
+  useEffect(() => {
+    const sub = player.addListener('playToEnd', () => {
+      player.pause();
       setIsPlaying(false);
       setHasEnded(true);
-    }
-  };
+    });
+    return () => sub.remove();
+  }, [player]);
 
   const handlePlay = () => {
-    if (hasEnded) { setVideoKey((k) => k + 1); setHasEnded(false); }
-    setShouldPlay(true);
+    if (hasEnded) { player.currentTime = 0; setHasEnded(false); }
+    player.play();
   };
 
   return (
     <View style={styles.page}>
-      <Video
-        ref={videoRef}
-        key={videoKey}
-        source={{ uri: item.vaultUri }}
+      <VideoView
+        player={player}
         style={rotatedImageStyle(item.rotation)}
-        resizeMode={ResizeMode.CONTAIN}
-        useNativeControls={false}
-        shouldPlay={shouldPlay}
-        rate={playbackRate}
-        onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-        progressUpdateIntervalMillis={250}
+        nativeControls={false}
+        contentFit="contain"
       />
       {!isPlaying && (
         <TouchableOpacity
@@ -284,8 +306,8 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
       )}
       {isPlaying && (
         <TouchableWithoutFeedback onPress={() => {
-          if (controlsVisible) { setShouldPlay(false); } // pause only if controls are visible
-          else { onTap(); }                               // otherwise just show controls
+          if (controlsVisible) { player.pause(); }
+          else { onTap(); }
         }}>
           <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
@@ -555,13 +577,39 @@ export default function MediaViewerScreen() {
 
   const handleUnhide = async () => {
     setMenuSheet('closed');
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to save media to your gallery.');
+    let tempUri: string | null = null;
+    try {
+      if (Platform.OS === 'ios') {
+        // iOS requires explicit photo library permission
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
+          return;
+        }
+      }
+      // Android 10+: no permission needed for MediaStore inserts — skip the check entirely.
+      // Android 9-: createAssetAsync will throw a permission error if WRITE_EXTERNAL_STORAGE is absent.
+
+      let uriToSave = currentItem.vaultUri;
+      if (Platform.OS === 'android') {
+        // MediaStore cannot read from the app's private internal storage — copy to cache first
+        tempUri = Paths.cache.uri + currentItem.id + '_' + currentItem.fileName;
+        console.log('[Unhide] Copying to cache:', tempUri);
+        await FileSystem.copyAsync({ from: currentItem.vaultUri, to: tempUri });
+        uriToSave = tempUri;
+        console.log('[Unhide] Cached. Saving to gallery...');
+      }
+
+      await MediaLibrary.createAssetAsync(uriToSave);
+      console.log('[Unhide] Saved to gallery successfully.');
+    } catch (e: any) {
+      console.log('[Unhide] Error:', e);
+      if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+      Alert.alert('Save Failed', e?.message ?? String(e));
       return;
     }
-    try { await MediaLibrary.saveToLibraryAsync(currentItem.vaultUri); await removeCurrentItem(); }
-    catch { Alert.alert('Error', 'Failed to save to gallery.'); }
+    if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+    await removeCurrentItem();
   };
 
   const handleRotate = async () => {

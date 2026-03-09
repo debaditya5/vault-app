@@ -12,6 +12,8 @@ import {
   FlatList,
   Share,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
+import { Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { MediaItem } from '../../types';
 import { useVault } from '../../context/VaultContext';
@@ -41,10 +43,9 @@ type Sheet = 'menu' | 'rename' | 'details' | 'move';
 interface Props {
   item: MediaItem | null;
   onClose: () => void;
-  onEnterSelect: (item: MediaItem) => void;
 }
 
-export default function MediaActionsSheet({ item, onClose, onEnterSelect }: Props) {
+export default function MediaActionsSheet({ item, onClose }: Props) {
   const { renameMedia, setFolderCover, deleteMedia, moveMedia, folders } = useVault();
   const [sheet, setSheet] = useState<Sheet>('menu');
   const [newName, setNewName] = useState('');
@@ -63,18 +64,30 @@ export default function MediaActionsSheet({ item, onClose, onEnterSelect }: Prop
 
   const handleUnhide = async () => {
     if (!item) return;
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to save media to your gallery.');
+    if (Platform.OS === 'ios') {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow photo library access in Settings.');
+        return;
+      }
+    }
+    let tempUri: string | null = null;
+    try {
+      let uriToSave = item.vaultUri;
+      if (Platform.OS === 'android') {
+        tempUri = Paths.cache.uri + item.id + '_' + item.fileName;
+        await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
+        uriToSave = tempUri;
+      }
+      await MediaLibrary.createAssetAsync(uriToSave);
+    } catch (e: any) {
+      if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+      Alert.alert('Save Failed', e?.message ?? String(e));
       return;
     }
-    try {
-      await MediaLibrary.saveToLibraryAsync(item.vaultUri);
-      await deleteMedia(item);
-      handleClose();
-    } catch {
-      Alert.alert('Error', 'Failed to save to gallery.');
-    }
+    if (tempUri) FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+    await deleteMedia(item);
+    handleClose();
   };
 
   const handleRenameSubmit = async () => {
@@ -221,8 +234,6 @@ export default function MediaActionsSheet({ item, onClose, onEnterSelect }: Prop
           )}
           <View style={s.divider} />
           <SheetRow icon="📁" label="Move to Folder" onPress={() => setSheet('move')} />
-          <View style={s.divider} />
-          <SheetRow icon="☑️" label="Select" onPress={() => { handleClose(); onEnterSelect(item!); }} />
 
           <TouchableOpacity style={s.cancelRow} onPress={handleClose}>
             <Text style={s.cancelRowText}>Cancel</Text>
