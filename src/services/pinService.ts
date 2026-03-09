@@ -26,7 +26,9 @@ export async function clearPin(): Promise<void> {
  */
 export async function migrateToDefault(): Promise<void> {
   const current = await SecureStore.getItemAsync(PIN_KEY);
-  if (!current || current.length !== 6) {
+  // Only set default if no credential exists, or if it's a legacy 4-digit PIN.
+  // Passwords (8+ chars) and valid 6-digit PINs are left untouched.
+  if (!current || current.length === 4) {
     await SecureStore.setItemAsync(PIN_KEY, '000000');
   }
 }

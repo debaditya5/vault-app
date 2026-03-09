@@ -103,14 +103,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       [targetFolderId]: targetItems,
     }));
 
-    // Update covers + counts for both folders
-    const targetFolder = folders.find((f) => f.id === targetFolderId);
+    // Update counts; clear source cover only if the moved item was the cover
     const updatedFolders = folders.map((f) => {
       if (f.id === item.folderId) {
-        return { ...f, itemCount: sourceItems.length, coverUri: sourceItems[0]?.vaultUri };
+        return { ...f, itemCount: sourceItems.length, coverUri: f.coverUri === item.vaultUri ? undefined : f.coverUri };
       }
       if (f.id === targetFolderId) {
-        return { ...f, itemCount: targetItems.length, coverUri: targetFolder?.coverUri ?? newUri };
+        return { ...f, itemCount: targetItems.length };
       }
       return f;
     });
@@ -134,10 +133,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     await metadataService.saveMedia(folderId, updated);
     setMediaByFolder((prev) => ({ ...prev, [folderId]: updated }));
 
-    const coverUri = current.length === 0 ? items[0].vaultUri : undefined;
     const updatedFolders = folders.map((f) =>
       f.id === folderId
-        ? { ...f, itemCount: updated.length, coverUri: f.coverUri ?? coverUri }
+        ? { ...f, itemCount: updated.length }
         : f
     );
     await metadataService.saveFolders(updatedFolders);
@@ -151,10 +149,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     await metadataService.saveMedia(item.folderId, updated);
     setMediaByFolder((prev) => ({ ...prev, [item.folderId]: updated }));
 
-    const newCover = updated.length > 0 ? updated[0].vaultUri : undefined;
     const updatedFolders = folders.map((f) =>
       f.id === item.folderId
-        ? { ...f, itemCount: updated.length, coverUri: newCover }
+        ? { ...f, itemCount: updated.length, coverUri: item.vaultUri === f.coverUri ? undefined : f.coverUri }
         : f
     );
     await metadataService.saveFolders(updatedFolders);
@@ -174,10 +171,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     await metadataService.saveMedia(folderId, updated);
     setMediaByFolder((prev) => ({ ...prev, [folderId]: updated }));
 
-    const newCover = updated.length > 0 ? updated[0].vaultUri : undefined;
+    const deletedUris = new Set(items.map((m) => m.vaultUri));
     const updatedFolders = folders.map((f) =>
       f.id === folderId
-        ? { ...f, itemCount: updated.length, coverUri: newCover }
+        ? { ...f, itemCount: updated.length, coverUri: f.coverUri && deletedUris.has(f.coverUri) ? undefined : f.coverUri }
         : f
     );
     await metadataService.saveFolders(updatedFolders);

@@ -3,6 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { VaultProvider } from './src/context/VaultContext';
 import { SettingsProvider } from './src/context/SettingsContext';
@@ -33,16 +34,18 @@ function AppInner() {
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
       <AuthProvider>
         <VaultProvider>
           <SettingsProvider>
             <NavigationContainer>
-              <StatusBar style="light" />
+              <StatusBar style="light" translucent={false} backgroundColor="#000000" />
               <AppInner />
             </NavigationContainer>
           </SettingsProvider>
         </VaultProvider>
       </AuthProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

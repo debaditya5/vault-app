@@ -14,6 +14,7 @@ import {
   Share,
   PanResponder,
 } from 'react-native';
+import { setStatusBarHidden, setStatusBarTranslucent } from 'expo-status-bar';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -199,9 +200,12 @@ interface VideoPageProps {
   isCurrent: boolean;
   onProgressUpdate: (posMs: number, durMs: number, isPlaying: boolean) => void;
   seekFnRef: React.MutableRefObject<((ms: number) => void) | null>;
+  playbackRate: number;
+  controlsVisible: boolean;
+  onTap: () => void;
 }
 
-function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef }: VideoPageProps) {
+function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate, controlsVisible, onTap }: VideoPageProps) {
   const [shouldPlay, setShouldPlay] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasEnded, setHasEnded] = useState(false);
@@ -262,29 +266,125 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef }: VideoPagePr
         resizeMode={ResizeMode.CONTAIN}
         useNativeControls={false}
         shouldPlay={shouldPlay}
+        rate={playbackRate}
         onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         progressUpdateIntervalMillis={250}
       />
       {!isPlaying && (
         <TouchableOpacity
           style={[StyleSheet.absoluteFill, styles.playOverlay]}
-          onPress={handlePlay}
+          onPress={() => { handlePlay(); onTap(); }}
           activeOpacity={1}
         >
           <View style={styles.playBtnCircle}>
-            <Text style={styles.playBtnIcon}>{hasEnded ? '↺' : '▶'}</Text>
+            <Text style={[styles.playBtnIcon, hasEnded && { marginLeft: 0 }]}>{hasEnded ? '↺' : '▶'}</Text>
           </View>
           <Text style={styles.playBtnLabel}>{hasEnded ? 'Replay' : 'Play'}</Text>
         </TouchableOpacity>
       )}
       {isPlaying && (
-        <TouchableWithoutFeedback onPress={() => setShouldPlay(false)}>
+        <TouchableWithoutFeedback onPress={() => {
+          if (controlsVisible) { setShouldPlay(false); } // pause only if controls are visible
+          else { onTap(); }                               // otherwise just show controls
+        }}>
           <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
       )}
     </View>
   );
 }
+
+// ─── Playback Speed Sheet ──────────────────────────────────────────────────────
+const SPEED_OPTIONS = [
+  { label: '0.25×', value: 0.25 },
+  { label: '0.5×',  value: 0.5  },
+  { label: '1×',    value: 1    },
+  { label: '2×',    value: 2    },
+  { label: '4×',    value: 4    },
+  { label: '8×',    value: 8    },
+];
+
+interface SpeedSheetProps {
+  visible: boolean;
+  current: number;
+  onSelect: (rate: number) => void;
+  onClose: () => void;
+}
+
+function SpeedSheet({ visible, current, onSelect, onClose }: SpeedSheetProps) {
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <TouchableOpacity style={spd.backdrop} activeOpacity={1} onPress={onClose}>
+        <View style={spd.card}>
+          <Text style={spd.title}>Playback Speed</Text>
+          <View style={spd.grid}>
+            {SPEED_OPTIONS.map(({ label, value }) => (
+              <TouchableOpacity
+                key={value}
+                style={[spd.chip, current === value && spd.chipActive]}
+                onPress={() => { onSelect(value); onClose(); }}
+              >
+                <Text style={[spd.chipText, current === value && spd.chipTextActive]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity style={spd.cancelBtn} onPress={onClose}>
+            <Text style={spd.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+const spd = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  card: {
+    backgroundColor: '#1c1c1e',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 36,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  chip: {
+    width: 90,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#2c2c2e',
+    alignItems: 'center',
+  },
+  chipActive: { backgroundColor: '#0a84ff' },
+  chipText: { color: '#aaa', fontSize: 17, fontWeight: '600' },
+  chipTextActive: { color: '#fff' },
+  cancelBtn: {
+    backgroundColor: '#2c2c2e',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  cancelText: { color: '#0a84ff', fontSize: 16, fontWeight: '600' },
+});
 
 // ─── Main screen ───────────────────────────────────────────────────────────────
 type MenuSheet = 'closed' | 'menu' | 'details';
@@ -300,13 +400,68 @@ export default function MediaViewerScreen() {
   const [menuSheet, setMenuSheet] = useState<MenuSheet>('closed');
   const [isSlideshowing, setIsSlideshowing] = useState(false);
   const [videoProgress, setVideoProgress] = useState({ posMs: 0, durMs: 0, isPlaying: false });
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [showSpeedSheet, setShowSpeedSheet] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   const flatListRef = useRef<FlatList<MediaItem>>(null);
   const slideshowRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const seekFnRef = useRef<((ms: number) => void) | null>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentItem = items[currentIndex];
+
+  // ── Controls auto-hide helpers ─────────────────────────────────────────────
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+  }, []);
+
+  const scheduleHide = useCallback((ms = 3000) => {
+    clearHideTimer();
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), ms);
+  }, [clearHideTimer]);
+
+  const handleScreenTap = useCallback(() => {
+    if (controlsVisible) {
+      setControlsVisible(false);
+      clearHideTimer();
+    } else {
+      setControlsVisible(true);
+      if (videoProgress.isPlaying) scheduleHide();
+    }
+  }, [controlsVisible, videoProgress.isPlaying, clearHideTimer, scheduleHide]);
+
+  // Make status bar translucent when entering viewer so hiding it doesn't shift layout,
+  // then hide/show with controls. Restore non-translucent on unmount.
+  useEffect(() => {
+    setStatusBarTranslucent(true);
+    return () => {
+      setStatusBarHidden(false, 'none');
+      setStatusBarTranslucent(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    setStatusBarHidden(!controlsVisible, 'slide');
+  }, [controlsVisible]);
+
+  // Auto-hide on mount
+  useEffect(() => {
+    scheduleHide(3000);
+    return () => clearHideTimer();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-hide when video starts playing; show when it pauses
+  useEffect(() => {
+    if (videoProgress.isPlaying) {
+      setControlsVisible(true);
+      scheduleHide(3000);
+    } else if (currentItem?.mediaType === 'video') {
+      clearHideTimer();
+      setControlsVisible(true);
+    }
+  }, [videoProgress.isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Video progress callback (stable ref) ──────────────────────────────────
   const handleVideoProgress = useCallback(
@@ -425,17 +580,22 @@ export default function MediaViewerScreen() {
           isCurrent={index === currentIndex}
           onProgressUpdate={handleVideoProgress}
           seekFnRef={seekFnRef}
+          playbackRate={playbackRate}
+          controlsVisible={controlsVisible}
+          onTap={handleScreenTap}
         />
       );
     }
     return (
-      <View style={styles.page}>
-        <Image
-          source={{ uri: item.vaultUri }}
-          style={rotatedImageStyle(item.rotation)}
-          resizeMode="contain"
-        />
-      </View>
+      <TouchableWithoutFeedback onPress={handleScreenTap}>
+        <View style={styles.page}>
+          <Image
+            source={{ uri: item.vaultUri }}
+            style={rotatedImageStyle(item.rotation)}
+            resizeMode="contain"
+          />
+        </View>
+      </TouchableWithoutFeedback>
     );
   };
 
@@ -443,6 +603,7 @@ export default function MediaViewerScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Status bar managed via imperative API to avoid conflict with expo-status-bar */}
       <FlatList
         ref={flatListRef}
         data={items}
@@ -458,54 +619,59 @@ export default function MediaViewerScreen() {
       />
 
       {/* Back button — top left */}
-      <SafeAreaView style={styles.topLeft} pointerEvents="box-none">
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-          <Text style={styles.backBtnText}>‹</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-
-      {/* Bottom control bar */}
-      <SafeAreaView style={styles.bottomBar}>
-        {/* Seek bar — above controls, only for videos */}
-        {showSeekBar && (
-          <SeekBar
-            posMs={videoProgress.posMs}
-            durMs={videoProgress.durMs}
-            onSeek={handleSeek}
-          />
-        )}
-
-        <View style={styles.controlRow}>
-          {/* 3-dot menu */}
-          <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuSheet('menu')} activeOpacity={0.8}>
-            <Text style={styles.menuBtnText}>•••</Text>
+      {controlsVisible && (
+        <SafeAreaView style={styles.topLeft} pointerEvents="box-none">
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+            <Text style={styles.backBtnText}>‹</Text>
           </TouchableOpacity>
+        </SafeAreaView>
+      )}
 
-          {/* Nav + slideshow */}
-          <View style={styles.navGroup}>
-            <TouchableOpacity
-              style={[styles.navBtn, currentIndex === 0 && styles.navBtnDisabled]}
-              onPress={goToPrev} disabled={currentIndex === 0}
-            >
-              <Text style={styles.navBtnText}>‹</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.navBtn} onPress={() => isSlideshowing ? stopSlideshow() : startSlideshow()}>
-              <Text style={styles.navBtnText}>{isSlideshowing ? '⏸' : '▶'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.navBtn, currentIndex === items.length - 1 && styles.navBtnDisabled]}
-              onPress={goToNext} disabled={currentIndex === items.length - 1}
-            >
-              <Text style={styles.navBtnText}>›</Text>
-            </TouchableOpacity>
-          </View>
+      {/* Bottom bar — seek bar always visible for videos; control row only when controls visible */}
+      {(showSeekBar || controlsVisible) && (
+        <SafeAreaView style={[styles.bottomBar, !controlsVisible && styles.bottomBarTransparent]}>
+          {showSeekBar && (
+            <SeekBar
+              posMs={videoProgress.posMs}
+              durMs={videoProgress.durMs}
+              onSeek={handleSeek}
+            />
+          )}
 
-          {/* Counter */}
-          <View style={styles.counter}>
-            <Text style={styles.counterText}>{currentIndex + 1}/{items.length}</Text>
-          </View>
-        </View>
-      </SafeAreaView>
+          {controlsVisible && (
+            <View style={styles.controlRow}>
+              {/* 3-dot menu */}
+              <TouchableOpacity style={styles.menuBtn} onPress={() => { clearHideTimer(); setMenuSheet('menu'); }} activeOpacity={0.8}>
+                <Text style={styles.menuBtnText}>•••</Text>
+              </TouchableOpacity>
+
+              {/* Nav + slideshow */}
+              <View style={styles.navGroup}>
+                <TouchableOpacity
+                  style={[styles.navBtn, currentIndex === 0 && styles.navBtnDisabled]}
+                  onPress={goToPrev} disabled={currentIndex === 0}
+                >
+                  <Text style={styles.navBtnText}>‹</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.navBtn} onPress={() => isSlideshowing ? stopSlideshow() : startSlideshow()}>
+                  <Text style={styles.navBtnText}>{isSlideshowing ? '⏸' : '▶'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.navBtn, currentIndex === items.length - 1 && styles.navBtnDisabled]}
+                  onPress={goToNext} disabled={currentIndex === items.length - 1}
+                >
+                  <Text style={styles.navBtnText}>›</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Counter */}
+              <View style={styles.counter}>
+                <Text style={styles.counterText}>{currentIndex + 1}/{items.length}</Text>
+              </View>
+            </View>
+          )}
+        </SafeAreaView>
+      )}
 
       {/* 3-dot action menu */}
       <Modal transparent animationType="slide" visible={menuSheet === 'menu'} onRequestClose={() => setMenuSheet('closed')}>
@@ -521,6 +687,16 @@ export default function MediaViewerScreen() {
             <MenuRow icon="ℹ️" label="Details" onPress={() => setMenuSheet('details')} />
             <ms.Divider />
             <MenuRow icon="↻" label="Rotate 90°" onPress={handleRotate} />
+            {currentItem?.mediaType === 'video' && (
+              <>
+                <ms.Divider />
+                <MenuRow
+                  icon="⏩"
+                  label={`Playback Speed  ${playbackRate === 1 ? '1×' : `${playbackRate}×`}`}
+                  onPress={() => { setMenuSheet('closed'); setShowSpeedSheet(true); }}
+                />
+              </>
+            )}
             <ms.Divider />
             <MenuRow icon="🗑️" label="Delete" onPress={handleDelete} danger />
             <TouchableOpacity style={ms.cancelRow} onPress={() => setMenuSheet('closed')}>
@@ -529,6 +705,14 @@ export default function MediaViewerScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Playback speed sheet */}
+      <SpeedSheet
+        visible={showSpeedSheet}
+        current={playbackRate}
+        onSelect={setPlaybackRate}
+        onClose={() => setShowSpeedSheet(false)}
+      />
 
       {/* Details modal */}
       <Modal transparent animationType="fade" visible={menuSheet === 'details'} onRequestClose={() => setMenuSheet('closed')}>
@@ -609,6 +793,9 @@ const styles = StyleSheet.create({
   bottomBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  bottomBarTransparent: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
   controlRow: {
     flexDirection: 'row', alignItems: 'center',

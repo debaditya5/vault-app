@@ -13,7 +13,7 @@ import {
   Share,
 } from 'react-native';
 import * as MediaLibrary from 'expo-media-library';
-import { MediaItem, Folder } from '../../types';
+import { MediaItem } from '../../types';
 import { useVault } from '../../context/VaultContext';
 
 function formatBytes(bytes: number): string {
@@ -213,8 +213,12 @@ export default function MediaActionsSheet({ item, onClose, onEnterSelect }: Prop
           <SheetRow icon="✏️" label="Rename" onPress={() => { setNewName(splitFilename(item!.fileName).name); setSheet('rename'); }} />
           <View style={s.divider} />
           <SheetRow icon="ℹ️" label="Details" onPress={() => setSheet('details')} />
-          <View style={s.divider} />
-          <SheetRow icon="🖼️" label="Set as Album Cover" onPress={handleSetCover} />
+          {item!.mediaType === 'photo' && (
+            <>
+              <View style={s.divider} />
+              <SheetRow icon="🖼️" label="Set as Album Cover" onPress={handleSetCover} />
+            </>
+          )}
           <View style={s.divider} />
           <SheetRow icon="📁" label="Move to Folder" onPress={() => setSheet('move')} />
           <View style={s.divider} />

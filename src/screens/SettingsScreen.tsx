@@ -4,9 +4,9 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { Paths } from 'expo-file-system';
@@ -33,11 +33,19 @@ const SLIDESHOW_OPTIONS = [
   { label: '10s', ms: 10000 },
 ];
 
+const LONG_PRESS_OPTIONS = [
+  { label: '0.5s', ms: 500 },
+  { label: '1s',   ms: 1000 },
+  { label: '1.5s', ms: 1500 },
+  { label: '2s',   ms: 2000 },
+  { label: '3s',   ms: 3000 },
+];
+
 export default function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { lock } = useAuth();
   const { folders, mediaByFolder } = useVault();
-  const { slideshowInterval, setSlideshowInterval } = useSettings();
+  const { slideshowInterval, setSlideshowInterval, longPressDelay, setLongPressDelay, authMethod, setAuthMethod } = useSettings();
 
   const storageStats = useMemo(() => {
     let totalItems = 0;
@@ -60,23 +68,66 @@ export default function SettingsScreen() {
         {/* Security */}
         <Text style={styles.sectionHeader}>Security</Text>
         <View style={styles.card}>
+          {/* Auth method selector */}
+          <View style={[styles.row, styles.rowBorder]}>
+            <View style={styles.rowContent}>
+              <Text style={styles.rowLabel}>Auth Method</Text>
+              <Text style={styles.rowSublabel}>PIN (6 digits) or Password (8+ chars)</Text>
+            </View>
+            <View style={styles.durationRow}>
+              {(['pin', 'password'] as const).map((method) => (
+                <TouchableOpacity
+                  key={method}
+                  style={[styles.durationChip, authMethod === method && styles.durationChipActive]}
+                  onPress={() => {
+                    if (authMethod !== method) {
+                      navigation.navigate('ChangePin', { targetMethod: method });
+                    }
+                  }}
+                >
+                  <Text style={[styles.durationChipText, authMethod === method && styles.durationChipTextActive]}>
+                    {method === 'pin' ? 'PIN' : 'Password'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
           <TouchableOpacity
             style={[styles.row, styles.rowBorder]}
-            onPress={() => navigation.navigate('ChangePin')}
+            onPress={() => navigation.navigate('ChangePin', {})}
             activeOpacity={0.6}
           >
             <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>Change PIN</Text>
-              <Text style={styles.rowSublabel}>Update your 6-digit vault PIN</Text>
+              <Text style={styles.rowLabel}>{authMethod === 'pin' ? 'Change PIN' : 'Change Password'}</Text>
+              <Text style={styles.rowSublabel}>{authMethod === 'pin' ? 'Update your 6-digit vault PIN' : 'Update your vault password'}</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.row} onPress={lock} activeOpacity={0.6}>
+          <TouchableOpacity style={[styles.row, styles.rowBorder]} onPress={lock} activeOpacity={0.6}>
             <View style={styles.rowContent}>
               <Text style={styles.rowLabel}>Lock Vault</Text>
               <Text style={styles.rowSublabel}>Return to lock screen immediately</Text>
             </View>
           </TouchableOpacity>
+          <View style={styles.row}>
+            <View style={styles.rowContent}>
+              <Text style={styles.rowLabel}>Splash Hold Duration</Text>
+              <Text style={styles.rowSublabel}>How long to hold "SECRET" to unlock</Text>
+            </View>
+            <View style={styles.durationRow}>
+              {LONG_PRESS_OPTIONS.map(({ label, ms }) => (
+                <TouchableOpacity
+                  key={ms}
+                  style={[styles.durationChip, longPressDelay === ms && styles.durationChipActive]}
+                  onPress={() => setLongPressDelay(ms)}
+                >
+                  <Text style={[styles.durationChipText, longPressDelay === ms && styles.durationChipTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
         </View>
 
         {/* Slideshow */}

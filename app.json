@@ -19,6 +19,11 @@
       }
     },
     "android": {
+      "statusBar": {
+        "translucent": false,
+        "backgroundColor": "#000000",
+        "barStyle": "light-content"
+      },
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
