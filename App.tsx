@@ -8,6 +8,11 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { VaultProvider } from './src/context/VaultContext';
 import { SettingsProvider } from './src/context/SettingsContext';
 import RootNavigator from './src/navigation/RootNavigator';
+import { migrateToDefault } from './src/services/pinService';
+
+// Run PIN migration at module load time so it fires on every full JS bundle
+// evaluation (including Expo Fast Refresh full reloads), not just on component mount.
+migrateToDefault().catch(() => {});
 
 function AppInner() {
   const { lock, isAuthenticated, isLockSuppressed } = useAuth();

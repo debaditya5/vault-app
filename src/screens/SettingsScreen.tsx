@@ -104,14 +104,14 @@ export default function SettingsScreen() {
                 onChangeText={setFpDraft}
                 onBlur={() => {
                   const val = fpDraft.trim();
-                  const saved = val.length >= 6 ? val : '000000';
+                  const saved = val.length >= 6 ? val : '123456';
                   setFpDraft(saved);
                   setFalsePassword(saved);
                 }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 maxLength={32}
-                placeholder="000000"
+                placeholder="123456"
                 placeholderTextColor="#444"
               />
             </View>

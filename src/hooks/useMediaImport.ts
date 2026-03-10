@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
@@ -41,7 +41,13 @@ export default function useMediaImport(folderId: string) {
     });
 
     if (result.canceled || !result.assets?.length) {
-      restoreLock();
+      // On Android, picker returning can still have trailing inactive transitions;
+      // use the same deferred restore to avoid a spurious lock on cancel.
+      if (Platform.OS === 'android') {
+        setTimeout(restoreLock, 600);
+      } else {
+        restoreLock();
+      }
       return;
     }
 
@@ -111,19 +117,29 @@ export default function useMediaImport(folderId: string) {
         }
       }
     } finally {
-      // On Android, deleteAssetsAsync may resolve while the system confirmation
-      // dialog is still mid-transition. Restoring the lock immediately would
-      // allow the pending inactive→active AppState event to trigger lock().
-      // Only restore once the app is confirmed active.
-      if (AppState.currentState === 'active') {
+      // On Android, the picker and delete dialog cause lingering inactive state
+      // transitions that can fire AFTER the async operation resolves. If we restore
+      // the lock while those transitions are still pending, the AppState listener
+      // in App.tsx will see an unsuppressed inactive event and lock the vault.
+      // Use a deduped restore: subscribe to the next 'active' event, and on Android
+      // also add a timeout fallback in case we're already in 'active' state.
+      let restored = false;
+      const doRestore = () => {
+        if (restored) return;
+        restored = true;
         restoreLock();
-      } else {
-        const sub = AppState.addEventListener('change', (state) => {
-          if (state === 'active') {
-            restoreLock();
-            sub.remove();
-          }
-        });
+        stateSub.remove();
+      };
+      const stateSub = AppState.addEventListener('change', (state) => {
+        if (state === 'active') doRestore();
+      });
+      if (AppState.currentState === 'active') {
+        if (Platform.OS === 'android') {
+          // Delay so any trailing inactive transitions from the picker/dialog settle first
+          setTimeout(doRestore, 600);
+        } else {
+          doRestore();
+        }
       }
       setIsImporting(false);
     }

@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const SETTINGS_KEY = 'VAULT_SETTINGS';
 const DEFAULT_INTERVAL = 3000;
 const DEFAULT_LONG_PRESS = 1500;
-const DEFAULT_FALSE_PASSWORD = '000000';
+const DEFAULT_FALSE_PASSWORD = '123456';
 
 interface SettingsContextType {
   slideshowInterval: number;
@@ -29,7 +29,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         const s = JSON.parse(json);
         if (s.slideshowInterval) setSlideshowIntervalState(s.slideshowInterval);
         if (s.longPressDelay) setLongPressDelayState(s.longPressDelay);
-        if (s.falsePassword !== undefined) setFalsePasswordState(s.falsePassword);
+
+        // Use stored false password, but correct the old wrong default '000000' → '123456'
+        const stored = s.falsePassword;
+        if (stored !== undefined) {
+          const corrected = stored === '000000' ? DEFAULT_FALSE_PASSWORD : stored;
+          setFalsePasswordState(corrected);
+          if (corrected !== stored) {
+            // Persist the correction so it doesn't revert on next load
+            AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, falsePassword: corrected }));
+          }
+        }
       } catch {}
     });
   }, []);

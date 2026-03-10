@@ -25,7 +25,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lockSuppressedRef = useRef(false);
 
   useEffect(() => {
-    // Migrate any old 4-digit PIN (or missing PIN) to default "000000"
     migrateToDefault().then(() => {
       setIsPinSet(true);
       setIsLoading(false);
