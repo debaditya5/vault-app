@@ -302,12 +302,16 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
 
   return (
     <View style={styles.page}>
-      <VideoView
-        player={player}
-        style={rotatedImageStyle(item.rotation)}
-        nativeControls={false}
-        contentFit="contain"
-      />
+      {/* Wrap VideoView so the rotation transform applies to an RN View, not the
+          native Android video surface (which ignores RN transforms on Android). */}
+      <View style={rotatedImageStyle(item.rotation)}>
+        <VideoView
+          player={player}
+          style={{ width: '100%', height: '100%' }}
+          nativeControls={false}
+          contentFit="contain"
+        />
+      </View>
       {!isPlaying && (
         <TouchableOpacity
           style={[StyleSheet.absoluteFill, styles.playOverlay]}

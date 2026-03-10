@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus, View, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -12,12 +12,15 @@ import RootNavigator from './src/navigation/RootNavigator';
 function AppInner() {
   const { lock, isAuthenticated, isLockSuppressed } = useAuth();
   const appState = useRef<AppStateStatus>(AppState.currentState);
+  const [obscured, setObscured] = useState(AppState.currentState !== 'active');
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
+      const isHidden = nextState === 'background' || nextState === 'inactive';
+      setObscured(isHidden);
       if (
         appState.current === 'active' &&
-        (nextState === 'background' || nextState === 'inactive') &&
+        isHidden &&
         isAuthenticated &&
         !isLockSuppressed()
       ) {
@@ -28,8 +31,20 @@ function AppInner() {
     return () => subscription.remove();
   }, [isAuthenticated, lock, isLockSuppressed]);
 
-  return <RootNavigator />;
+  return (
+    <>
+      <RootNavigator />
+      {obscured && <View style={styles.privacyOverlay} />}
+    </>
+  );
 }
+
+const styles = StyleSheet.create({
+  privacyOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
+  },
+});
 
 export default function App() {
   return (

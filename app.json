@@ -13,13 +13,14 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.dk.timematrix",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Vault needs access to your photo library to import photos and videos into your secure vault.",
         "NSPhotoLibraryAddUsageDescription": "Vault needs access to save photos to your library."
       }
     },
     "android": {
-      "package": "com.debaditya.timematrix",
+      "package": "com.dk.timematrix",
       "statusBar": {
         "translucent": false,
         "backgroundColor": "#000000",

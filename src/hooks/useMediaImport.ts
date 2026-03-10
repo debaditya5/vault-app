@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AppState } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
@@ -110,9 +111,20 @@ export default function useMediaImport(folderId: string) {
         }
       }
     } finally {
-      // Restore only after deletion dialog is fully resolved so the vault
-      // doesn't lock while the user is still interacting with the OS prompt.
-      restoreLock();
+      // On Android, deleteAssetsAsync may resolve while the system confirmation
+      // dialog is still mid-transition. Restoring the lock immediately would
+      // allow the pending inactive→active AppState event to trigger lock().
+      // Only restore once the app is confirmed active.
+      if (AppState.currentState === 'active') {
+        restoreLock();
+      } else {
+        const sub = AppState.addEventListener('change', (state) => {
+          if (state === 'active') {
+            restoreLock();
+            sub.remove();
+          }
+        });
+      }
       setIsImporting(false);
     }
   };
