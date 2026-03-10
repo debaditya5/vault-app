@@ -19,6 +19,7 @@
       }
     },
     "android": {
+      "package": "com.debaditya5.vaultapp",
       "statusBar": {
         "translucent": false,
         "backgroundColor": "#000000",
