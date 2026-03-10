@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -43,9 +44,14 @@ const LONG_PRESS_OPTIONS = [
 
 export default function SettingsScreen() {
   const navigation = useNavigation<Nav>();
-  const { lock } = useAuth();
+  const { lock, isFalseMode } = useAuth();
   const { folders, mediaByFolder } = useVault();
-  const { slideshowInterval, setSlideshowInterval, longPressDelay, setLongPressDelay, authMethod, setAuthMethod } = useSettings();
+  const { slideshowInterval, setSlideshowInterval, longPressDelay, setLongPressDelay, falsePassword, setFalsePassword } = useSettings();
+
+  const [fpDraft, setFpDraft] = useState(falsePassword);
+
+  // Sync draft when settings load from storage
+  useEffect(() => { setFpDraft(falsePassword); }, [falsePassword]);
 
   const storageStats = useMemo(() => {
     let totalItems = 0;
@@ -68,38 +74,14 @@ export default function SettingsScreen() {
         {/* Security */}
         <Text style={styles.sectionHeader}>Security</Text>
         <View style={styles.card}>
-          {/* Auth method selector */}
-          <View style={[styles.row, styles.rowBorder]}>
-            <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>Auth Method</Text>
-              <Text style={styles.rowSublabel}>PIN (6 digits) or Password (8+ chars)</Text>
-            </View>
-            <View style={styles.durationRow}>
-              {(['pin', 'password'] as const).map((method) => (
-                <TouchableOpacity
-                  key={method}
-                  style={[styles.durationChip, authMethod === method && styles.durationChipActive]}
-                  onPress={() => {
-                    if (authMethod !== method) {
-                      navigation.navigate('ChangePin', { targetMethod: method });
-                    }
-                  }}
-                >
-                  <Text style={[styles.durationChipText, authMethod === method && styles.durationChipTextActive]}>
-                    {method === 'pin' ? 'PIN' : 'Password'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
           <TouchableOpacity
             style={[styles.row, styles.rowBorder]}
-            onPress={() => navigation.navigate('ChangePin', {})}
+            onPress={() => navigation.navigate('ChangePin')}
             activeOpacity={0.6}
           >
             <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>{authMethod === 'pin' ? 'Change PIN' : 'Change Password'}</Text>
-              <Text style={styles.rowSublabel}>{authMethod === 'pin' ? 'Update your 6-digit vault PIN' : 'Update your vault password'}</Text>
+              <Text style={styles.rowLabel}>Change PIN</Text>
+              <Text style={styles.rowSublabel}>Update your 6-digit vault PIN</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
           </TouchableOpacity>
@@ -109,10 +91,35 @@ export default function SettingsScreen() {
               <Text style={styles.rowSublabel}>Return to lock screen immediately</Text>
             </View>
           </TouchableOpacity>
+          {/* False password — hidden when in false mode to avoid detection */}
+          {!isFalseMode && (
+            <View style={[styles.row, styles.rowBorder]}>
+              <View style={styles.rowContent}>
+                <Text style={styles.rowLabel}>False Password</Text>
+                <Text style={styles.rowSublabel}>Opens a decoy vault for plausible deniability</Text>
+              </View>
+              <TextInput
+                style={styles.falsePwInput}
+                value={fpDraft}
+                onChangeText={setFpDraft}
+                onBlur={() => {
+                  const val = fpDraft.trim();
+                  const saved = val.length >= 6 ? val : '000000';
+                  setFpDraft(saved);
+                  setFalsePassword(saved);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={32}
+                placeholder="000000"
+                placeholderTextColor="#444"
+              />
+            </View>
+          )}
           <View style={styles.row}>
             <View style={styles.rowContent}>
               <Text style={styles.rowLabel}>Splash Hold Duration</Text>
-              <Text style={styles.rowSublabel}>How long to hold "SECRET" to unlock</Text>
+              <Text style={styles.rowSublabel}>How long to hold "World Time" to unlock</Text>
             </View>
             <View style={styles.durationRow}>
               {LONG_PRESS_OPTIONS.map(({ label, ms }) => (
@@ -180,9 +187,9 @@ export default function SettingsScreen() {
         {/* About */}
         <Text style={styles.sectionHeader}>About</Text>
         <View style={styles.card}>
-          <View style={styles.row}>
+          <View style={[styles.row, styles.rowBorder]}>
             <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>Vault</Text>
+              <Text style={styles.rowLabel}>TimeMatrix</Text>
               <Text style={styles.rowSublabel}>Secure photo &amp; video storage</Text>
             </View>
           </View>
@@ -219,4 +226,12 @@ const styles = StyleSheet.create({
   durationChipActive: { backgroundColor: '#0a84ff' },
   durationChipText: { color: '#888', fontSize: 13, fontWeight: '500' },
   durationChipTextActive: { color: '#fff', fontWeight: '700' },
+
+  mono: { fontFamily: 'monospace', color: '#0a84ff' },
+
+  // False password input
+  falsePwInput: {
+    color: '#0a84ff', fontSize: 15, fontFamily: 'monospace',
+    textAlign: 'right', minWidth: 80, paddingVertical: 4,
+  },
 });

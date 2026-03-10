@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
 import { useVault } from '../context/VaultContext';
 import { useAuth } from '../context/AuthContext';
@@ -23,7 +24,7 @@ function getExtension(uri: string, mimeType?: string): string {
 
 export default function useMediaImport(folderId: string) {
   const { addMediaBatch } = useVault();
-  const { suppressLock, restoreLock } = useAuth();
+  const { suppressLock, restoreLock, isFalseMode } = useAuth();
   const [isImporting, setIsImporting] = useState(false);
 
   const importMedia = async () => {
@@ -37,25 +38,43 @@ export default function useMediaImport(folderId: string) {
       quality: 1,
       exif: false,
     });
-    restoreLock();
 
-    if (result.canceled || !result.assets?.length) return;
+    if (result.canceled || !result.assets?.length) {
+      restoreLock();
+      return;
+    }
 
     setIsImporting(true);
     try {
-      // Copy all files first, build the full batch, then commit in one state update
       const batch: MediaItem[] = [];
+      const assetIdsToDelete: string[] = [];
 
       for (const asset of result.assets) {
         const mediaId = generateId();
         const ext = getExtension(asset.uri, asset.mimeType ?? undefined);
-        const vaultUri = await copyToVault(asset.uri, folderId, mediaId, ext);
 
+        let vaultUri: string;
         let fileSizeBytes = 0;
-        try {
-          fileSizeBytes = new File(vaultUri).size ?? 0;
-        } catch {
-          // non-critical
+
+        if (isFalseMode) {
+          vaultUri = asset.uri;
+        } else {
+          // Store with the media ID as filename, keeping the original extension
+          const storedFilename = `${mediaId}.${ext}`;
+          vaultUri = await copyToVault(asset.uri, folderId, storedFilename);
+          try {
+            fileSizeBytes = new File(vaultUri).size ?? 0;
+          } catch {
+            // non-critical
+          }
+          // assetId can be null on Android when picked from certain sources;
+          // fall back to extracting the numeric ID from the content URI.
+          const assetId = asset.assetId
+            ?? asset.uri.match(/\/(\d+)(?:[?#]|$)/)?.[1]
+            ?? null;
+          if (assetId) {
+            assetIdsToDelete.push(assetId);
+          }
         }
 
         batch.push({
@@ -73,9 +92,27 @@ export default function useMediaImport(folderId: string) {
         });
       }
 
-      // Single state update for all items — fixes stale-state bug with multiple selections
       await addMediaBatch(batch);
+
+      // Delete originals — lock stays suppressed so any OS-level confirmation
+      // dialog (iOS 14+ / Android 11+) doesn't trigger a vault lock mid-flow.
+      if (assetIdsToDelete.length > 0) {
+        try {
+          // Ensure MediaLibrary write access (image-picker only grants read).
+          const { granted } = await MediaLibrary.requestPermissionsAsync();
+          if (granted) {
+            // On iOS and Android API 30+ this shows a system confirmation dialog.
+            // On Android < 30 this may fail silently — no workaround.
+            await MediaLibrary.deleteAssetsAsync(assetIdsToDelete);
+          }
+        } catch {
+          // Non-critical — vault already has the copy regardless.
+        }
+      }
     } finally {
+      // Restore only after deletion dialog is fully resolved so the vault
+      // doesn't lock while the user is still interacting with the OS prompt.
+      restoreLock();
       setIsImporting(false);
     }
   };

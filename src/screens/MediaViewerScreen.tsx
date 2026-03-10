@@ -3,7 +3,6 @@ import {
   View,
   Image,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   TouchableWithoutFeedback,
   Text,
@@ -11,10 +10,10 @@ import {
   Alert,
   FlatList,
   Modal,
-  Share,
   PanResponder,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { setStatusBarHidden, setStatusBarTranslucent } from 'expo-status-bar';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -215,15 +214,28 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
   const onProgressUpdateRef = useRef(onProgressUpdate);
   useEffect(() => { onProgressUpdateRef.current = onProgressUpdate; }, [onProgressUpdate]);
 
-  const player = useVideoPlayer(item.vaultUri, (p) => { p.loop = false; });
+  // Seed duration from stored metadata so the seekbar shows immediately on open.
+  // statusChange/readyToPlay may fire while the item is off-screen (not current).
+  const cachedDurRef = useRef(item.duration != null ? item.duration * 1000 : 0);
 
-  // Pause and reset UI when navigating away
+  const player = useVideoPlayer(item.vaultUri, (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.1;
+  });
+
+  // Pause and reset UI when navigating away; re-emit duration when becoming current
   useEffect(() => {
-    if (!isCurrent) {
+    if (isCurrent) {
+      // Always emit when becoming current so the seekbar appears immediately.
+      // cachedDurRef is pre-seeded with item.duration from stored metadata.
+      onProgressUpdate(player.currentTime * 1000, cachedDurRef.current, player.playing);
+    } else {
       player.pause();
       setIsPlaying(false);
       setHasEnded(false);
-      onProgressUpdate(0, 0, false);
+      // Do NOT reset videoProgress here — when going backward in the list,
+      // this effect fires AFTER the new current page has already set its duration,
+      // which would wipe out the seekbar. The parent resets progress for non-video items.
     }
   }, [isCurrent]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -250,17 +262,24 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
   useEffect(() => {
     const sub = player.addListener('timeUpdate', ({ currentTime }) => {
       if (isCurrentRef.current) {
-        onProgressUpdateRef.current(currentTime * 1000, (player.duration ?? 0) * 1000, player.playing);
+        const playerDur = (player.duration ?? 0) * 1000;
+        // Fall back to metadata-seeded duration if player hasn't populated it yet
+        const durMs = playerDur > 0 ? playerDur : cachedDurRef.current;
+        onProgressUpdateRef.current(currentTime * 1000, durMs, player.playing);
       }
     });
     return () => sub.remove();
   }, [player]);
 
-  // Duration available after load
+  // Duration available after load — always cache it; emit to parent only when current
   useEffect(() => {
     const sub = player.addListener('statusChange', ({ status }) => {
-      if (status === 'readyToPlay' && isCurrentRef.current) {
-        onProgressUpdateRef.current(player.currentTime * 1000, (player.duration ?? 0) * 1000, false);
+      if (status === 'readyToPlay') {
+        const durMs = (player.duration ?? 0) * 1000;
+        cachedDurRef.current = durMs;
+        if (isCurrentRef.current) {
+          onProgressUpdateRef.current(player.currentTime * 1000, durMs, false);
+        }
       }
     });
     return () => sub.remove();
@@ -296,7 +315,7 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
           activeOpacity={1}
         >
           <View style={styles.playBtnCircle}>
-            <Text style={[styles.playBtnIcon, hasEnded && { marginLeft: 0 }]}>{hasEnded ? '↺' : '▶'}</Text>
+            <Text style={[styles.playBtnIcon, hasEnded && { marginLeft: 0, marginTop: Platform.OS === 'android' ? 4 : 0 }]}>{hasEnded ? '↺' : '▶'}</Text>
           </View>
           <Text style={styles.playBtnLabel}>{hasEnded ? 'Replay' : 'Play'}</Text>
         </TouchableOpacity>
@@ -411,6 +430,7 @@ type MenuSheet = 'closed' | 'menu' | 'details';
 export default function MediaViewerScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
+  const insets = useSafeAreaInsets();
   const { deleteMedia, setFolderCover, rotateMedia } = useVault();
   const { slideshowInterval } = useSettings();
 
@@ -481,6 +501,13 @@ export default function MediaViewerScreen() {
       setControlsVisible(true);
     }
   }, [videoProgress.isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset seekbar state when the current item is not a video
+  useEffect(() => {
+    if (currentItem?.mediaType !== 'video') {
+      setVideoProgress({ posMs: 0, durMs: 0, isPlaying: false });
+    }
+  }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Video progress callback (stable ref) ──────────────────────────────────
   const handleVideoProgress = useCallback(
@@ -566,12 +593,6 @@ export default function MediaViewerScreen() {
     ]);
   };
 
-  const handleShare = async () => {
-    setMenuSheet('closed');
-    try { await Share.share({ url: currentItem.vaultUri, title: currentItem.fileName }); }
-    catch { Alert.alert('Share failed', 'Could not share this file.'); }
-  };
-
   const handleRotate = async () => {
     setMenuSheet('closed');
     const newRotation = ((currentItem.rotation ?? 0) + 90) % 360;
@@ -628,16 +649,16 @@ export default function MediaViewerScreen() {
 
       {/* Back button — top left */}
       {controlsVisible && (
-        <SafeAreaView style={styles.topLeft} pointerEvents="box-none">
+        <View style={[styles.topLeft, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
             <Text style={styles.backBtnText}>‹</Text>
           </TouchableOpacity>
-        </SafeAreaView>
+        </View>
       )}
 
       {/* Bottom bar — seek bar always visible for videos; control row only when controls visible */}
       {(showSeekBar || controlsVisible) && (
-        <SafeAreaView style={[styles.bottomBar, !controlsVisible && styles.bottomBarTransparent]}>
+        <View style={[styles.bottomBar, !controlsVisible && styles.bottomBarTransparent, { paddingBottom: insets.bottom }]}>
           {showSeekBar && (
             <SeekBar
               posMs={videoProgress.posMs}
@@ -678,7 +699,7 @@ export default function MediaViewerScreen() {
               </View>
             </View>
           )}
-        </SafeAreaView>
+        </View>
       )}
 
       {/* 3-dot action menu */}
@@ -686,10 +707,12 @@ export default function MediaViewerScreen() {
         <TouchableOpacity style={ms.backdrop} activeOpacity={1} onPress={() => setMenuSheet('closed')}>
           <View style={ms.sheet}>
             <View style={ms.handle} />
-            <MenuRow icon="🖼️" label="Set as Album Cover" onPress={handleSetCover} />
-            <ms.Divider />
-            <MenuRow icon="📤" label="Share" onPress={handleShare} />
-            <ms.Divider />
+            {currentItem?.mediaType !== 'video' && (
+              <>
+                <MenuRow icon="🖼️" label="Set as Album Cover" onPress={handleSetCover} />
+                <ms.Divider />
+              </>
+            )}
             <MenuRow icon="ℹ️" label="Details" onPress={() => setMenuSheet('details')} />
             <ms.Divider />
             <MenuRow icon="↻" label="Rotate 90°" onPress={handleRotate} />
@@ -776,7 +799,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.8, shadowRadius: 16, elevation: 16,
   },
-  playBtnIcon: { color: '#fff', fontSize: 48, marginLeft: 8 },
+  playBtnIcon: { color: '#fff', fontSize: 48, marginLeft: 8, lineHeight: 56, includeFontPadding: false, textAlign: 'center' },
   playBtnLabel: {
     color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16, letterSpacing: 0.5,
     textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8,
@@ -785,7 +808,7 @@ const styles = StyleSheet.create({
   // Back button
   topLeft: {
     position: 'absolute', top: 0, left: 0,
-    paddingTop: 8, paddingLeft: 16,
+    paddingLeft: 16,
   },
   backBtn: {
     width: 44, height: 44, borderRadius: 22,

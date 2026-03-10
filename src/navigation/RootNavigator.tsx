@@ -12,8 +12,6 @@ import MediaViewerScreen from '../screens/MediaViewerScreen';
 import ChangePinScreen from '../screens/ChangePinScreen';
 import MainTabs from './MainTabs';
 import { Folder, MediaItem } from '../types';
-import { AuthMethod } from '../context/SettingsContext';
-
 export type RootStackParamList = {
   Splash: undefined;
   Lock: undefined;
@@ -21,7 +19,7 @@ export type RootStackParamList = {
   MainTabs: undefined;
   Folder: { folder: Folder };
   MediaViewer: { items: MediaItem[]; initialIndex: number };
-  ChangePin: { targetMethod?: AuthMethod } | undefined;
+  ChangePin: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();

@@ -4,16 +4,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const SETTINGS_KEY = 'VAULT_SETTINGS';
 const DEFAULT_INTERVAL = 3000;
 const DEFAULT_LONG_PRESS = 1500;
-
-export type AuthMethod = 'pin' | 'password';
+const DEFAULT_FALSE_PASSWORD = '000000';
 
 interface SettingsContextType {
   slideshowInterval: number;
   setSlideshowInterval: (ms: number) => Promise<void>;
   longPressDelay: number;
   setLongPressDelay: (ms: number) => Promise<void>;
-  authMethod: AuthMethod;
-  setAuthMethod: (method: AuthMethod) => Promise<void>;
+  falsePassword: string;
+  setFalsePassword: (pw: string) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -21,7 +20,7 @@ const SettingsContext = createContext<SettingsContextType | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [slideshowInterval, setSlideshowIntervalState] = useState(DEFAULT_INTERVAL);
   const [longPressDelay, setLongPressDelayState] = useState(DEFAULT_LONG_PRESS);
-  const [authMethod, setAuthMethodState] = useState<AuthMethod>('pin');
+  const [falsePassword, setFalsePasswordState] = useState(DEFAULT_FALSE_PASSWORD);
 
   useEffect(() => {
     AsyncStorage.getItem(SETTINGS_KEY).then((json) => {
@@ -30,7 +29,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         const s = JSON.parse(json);
         if (s.slideshowInterval) setSlideshowIntervalState(s.slideshowInterval);
         if (s.longPressDelay) setLongPressDelayState(s.longPressDelay);
-        if (s.authMethod) setAuthMethodState(s.authMethod);
+        if (s.falsePassword !== undefined) setFalsePasswordState(s.falsePassword);
       } catch {}
     });
   }, []);
@@ -51,13 +50,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     await save({ longPressDelay: ms });
   };
 
-  const setAuthMethod = async (method: AuthMethod) => {
-    setAuthMethodState(method);
-    await save({ authMethod: method });
+  const setFalsePassword = async (pw: string) => {
+    setFalsePasswordState(pw);
+    await save({ falsePassword: pw });
   };
 
   return (
-    <SettingsContext.Provider value={{ slideshowInterval, setSlideshowInterval, longPressDelay, setLongPressDelay, authMethod, setAuthMethod }}>
+    <SettingsContext.Provider value={{ slideshowInterval, setSlideshowInterval, longPressDelay, setLongPressDelay, falsePassword, setFalsePassword }}>
       {children}
     </SettingsContext.Provider>
   );
