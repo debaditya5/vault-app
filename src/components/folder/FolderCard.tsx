@@ -23,7 +23,7 @@ export default function FolderCard({ folder, onPress, onLongPress, selected }: F
     >
       <View style={styles.thumbnail}>
         {folder.coverUri ? (
-          <Image source={{ uri: folder.coverUri }} style={styles.image} resizeMode="cover" contextMenuHidden />
+          <Image source={{ uri: folder.coverUri }} style={styles.image} resizeMode="cover" {...({ contextMenuHidden: true } as any)} />
         ) : (
           <View style={styles.placeholder}>
             <Text style={styles.folderIcon}>🗂️</Text>

@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Paths } from 'expo-file-system';
+import { vaultRootUri } from '../services/fileService';
 import { useAuth } from '../context/AuthContext';
 import { useVault } from '../context/VaultContext';
 import { useSettings } from '../context/SettingsContext';
@@ -64,7 +64,7 @@ export default function SettingsScreen() {
     return { totalItems, totalBytes, folderCount: folders.length };
   }, [folders, mediaByFolder]);
 
-  const vaultPath = `${Paths.document.uri}vault/`;
+  const vaultPath = vaultRootUri();
 
   return (
     <SafeAreaView style={styles.container}>

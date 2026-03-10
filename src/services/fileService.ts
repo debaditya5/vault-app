@@ -1,22 +1,36 @@
-import { Directory, File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 
-function folderDir(folderId: string): Directory {
-  return new Directory(Paths.document, 'vault', folderId);
+/**
+ * On Android, files are stored in external app-specific storage
+ * (Android/data/com.dk.timematrix/files/vault/) which is visible in the
+ * device's Files app. On iOS, internal documents directory is used.
+ */
+function getVaultRootUri(): string {
+  const docDir = FileSystem.documentDirectory ?? '';
+  if (Platform.OS === 'android') {
+    // docDir = file:///data/user/0/{pkg}/files/
+    // external = file:///storage/emulated/0/Android/data/{pkg}/files/
+    return docDir.replace(
+      /^file:\/\/\/data\/user\/\d+\//,
+      'file:///storage/emulated/0/Android/data/'
+    ) + 'vault/';
+  }
+  return docDir + 'vault/';
+}
+
+export function vaultRootUri(): string {
+  return getVaultRootUri();
 }
 
 /** Creates the vault root directory on first launch. */
 export async function initVaultRoot(): Promise<void> {
-  const root = new Directory(Paths.document, 'vault');
-  if (!root.exists) {
-    root.create({ intermediates: true });
-  }
+  await FileSystem.makeDirectoryAsync(getVaultRootUri(), { intermediates: true });
 }
 
-export async function ensureFolderDir(folderId: string): Promise<Directory> {
-  const dir = folderDir(folderId);
-  if (!dir.exists) {
-    dir.create({ intermediates: true });
-  }
+export async function ensureFolderDir(folderId: string): Promise<string> {
+  const dir = getVaultRootUri() + folderId + '/';
+  await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
   return dir;
 }
 
@@ -29,18 +43,14 @@ export async function copyToVault(
   folderId: string,
   storedFilename: string
 ): Promise<string> {
-  const destDir = await ensureFolderDir(folderId);
-  const sourceFile = new File(sourceUri);
-  const destFile = new File(destDir, storedFilename);
-  sourceFile.copy(destFile);
-  return destFile.uri;
+  const dir = await ensureFolderDir(folderId);
+  const dest = dir + storedFilename;
+  await FileSystem.copyAsync({ from: sourceUri, to: dest });
+  return dest;
 }
 
 export async function deleteFile(uri: string): Promise<void> {
-  const file = new File(uri);
-  if (file.exists) {
-    file.delete();
-  }
+  await FileSystem.deleteAsync(uri, { idempotent: true });
 }
 
 /**
@@ -52,17 +62,14 @@ export async function moveToFolder(
   targetFolderId: string,
   storedFilename: string
 ): Promise<string> {
-  const destDir = await ensureFolderDir(targetFolderId);
-  const sourceFile = new File(sourceUri);
-  const destFile = new File(destDir, storedFilename);
-  sourceFile.copy(destFile);
-  sourceFile.delete();
-  return destFile.uri;
+  const dir = await ensureFolderDir(targetFolderId);
+  const dest = dir + storedFilename;
+  await FileSystem.copyAsync({ from: sourceUri, to: dest });
+  await FileSystem.deleteAsync(sourceUri, { idempotent: true });
+  return dest;
 }
 
 export async function deleteFolderContents(folderId: string): Promise<void> {
-  const dir = folderDir(folderId);
-  if (dir.exists) {
-    dir.delete();
-  }
+  const dir = getVaultRootUri() + folderId + '/';
+  await FileSystem.deleteAsync(dir, { idempotent: true });
 }

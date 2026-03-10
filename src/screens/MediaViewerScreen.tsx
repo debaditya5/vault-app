@@ -247,8 +247,8 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
     return () => { if (isCurrent) seekFnRef.current = null; };
   }, [isCurrent, player, seekFnRef]);
 
-  // Sync playback rate
-  useEffect(() => { player.rate = playbackRate; }, [player, playbackRate]);
+  // Sync playback rate (player.rate is valid at runtime but missing from expo-video 3.x types)
+  useEffect(() => { (player as any).rate = playbackRate; }, [player, playbackRate]);
 
   // Playing / paused changes
   useEffect(() => {
@@ -302,12 +302,14 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
 
   return (
     <View style={styles.page}>
-      <VideoView
-        player={player}
-        style={rotatedImageStyle(item.rotation)}
-        nativeControls={false}
-        contentFit="contain"
-      />
+      <View style={rotatedImageStyle(item.rotation)}>
+        <VideoView
+          player={player}
+          style={{ width: '100%', height: '100%' }}
+          nativeControls={false}
+          contentFit="contain"
+        />
+      </View>
       {!isPlaying && (
         <TouchableOpacity
           style={[StyleSheet.absoluteFill, styles.playOverlay]}
@@ -601,7 +603,7 @@ export default function MediaViewerScreen() {
   };
 
   // ── Render items ───────────────────────────────────────────────────────────
-  const renderItem = ({ item, index }: { item: MediaItem; index: number }) => {
+  const renderItem = useCallback(({ item, index }: { item: MediaItem; index: number }) => {
     if (item.mediaType === 'video') {
       return (
         <VideoPage
@@ -626,7 +628,7 @@ export default function MediaViewerScreen() {
         </View>
       </TouchableWithoutFeedback>
     );
-  };
+  }, [currentIndex, handleVideoProgress, playbackRate, controlsVisible, handleScreenTap]);
 
   const showSeekBar = currentItem?.mediaType === 'video' && videoProgress.durMs > 0;
 
@@ -637,6 +639,7 @@ export default function MediaViewerScreen() {
         ref={flatListRef}
         data={items}
         keyExtractor={(item) => item.id}
+        extraData={playbackRate}
         renderItem={renderItem}
         horizontal
         pagingEnabled
