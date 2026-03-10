@@ -2,19 +2,31 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 
 /**
- * On Android, files are stored in external app-specific storage
- * (Android/data/com.dk.timematrix/files/vault/) which is visible in the
- * device's Files app. On iOS, internal documents directory is used.
+ * On Android, files go to external app-specific storage:
+ *   /storage/emulated/0/Android/data/{pkg}/files/vault/
+ * This directory is visible in the device Files app but hidden from gallery
+ * scanners (via .nomedia). No special permissions are required — an app always
+ * has access to its own Android/data/{pkg}/files/ directory.
+ *
+ * documentDirectory can take two forms on Android:
+ *   file:///data/user/0/{pkg}/files/   (standard)
+ *   file:///data/data/{pkg}/files/     (some ROMs / older devices)
+ * Both are handled by the regex below.
+ *
+ * When running inside Expo Go the documentDirectory is under
+ * host.exp.exponent which we do not own, so we fall back to internal storage
+ * for development builds and only use external storage in production builds.
  */
 function getVaultRootUri(): string {
   const docDir = FileSystem.documentDirectory ?? '';
   if (Platform.OS === 'android') {
-    // docDir = file:///data/user/0/{pkg}/files/
-    // external = file:///storage/emulated/0/Android/data/{pkg}/files/
-    return docDir.replace(
-      /^file:\/\/\/data\/user\/\d+\//,
-      'file:///storage/emulated/0/Android/data/'
-    ) + 'vault/';
+    const pkg = docDir.match(
+      /\/(?:data\/user\/\d+|data\/data)\/([^/]+)\/files\//
+    )?.[1];
+    // host.exp.exponent is the Expo Go client — we can't write to its external dir
+    if (pkg && pkg !== 'host.exp.exponent') {
+      return `file:///storage/emulated/0/Android/data/${pkg}/files/vault/`;
+    }
   }
   return docDir + 'vault/';
 }
@@ -23,9 +35,24 @@ export function vaultRootUri(): string {
   return getVaultRootUri();
 }
 
-/** Creates the vault root directory on first launch. */
+/** Returns the human-readable filesystem path (without file:// scheme). */
+export function vaultRootPath(): string {
+  return getVaultRootUri().replace(/^file:\/\//, '');
+}
+
+/** Creates the vault root directory and .nomedia file on first launch. */
 export async function initVaultRoot(): Promise<void> {
-  await FileSystem.makeDirectoryAsync(getVaultRootUri(), { intermediates: true });
+  const root = getVaultRootUri();
+  await FileSystem.makeDirectoryAsync(root, { intermediates: true });
+  // .nomedia hides vault files from gallery/media scanner while keeping them
+  // visible in the Files app under Android/data/{pkg}/files/vault/
+  if (Platform.OS === 'android') {
+    const nomedia = root + '.nomedia';
+    const info = await FileSystem.getInfoAsync(nomedia);
+    if (!info.exists) {
+      await FileSystem.writeAsStringAsync(nomedia, '');
+    }
+  }
 }
 
 export async function ensureFolderDir(folderId: string): Promise<string> {

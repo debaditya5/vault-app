@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppState, Platform } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
@@ -55,6 +55,7 @@ export default function useMediaImport(folderId: string) {
     try {
       const batch: MediaItem[] = [];
       const assetIdsToDelete: string[] = [];
+      let copyErrors = 0;
 
       for (const asset of result.assets) {
         const mediaId = generateId();
@@ -68,7 +69,13 @@ export default function useMediaImport(folderId: string) {
         } else {
           // Store with the media ID as filename, keeping the original extension
           const storedFilename = `${mediaId}.${ext}`;
-          vaultUri = await copyToVault(asset.uri, folderId, storedFilename);
+          try {
+            vaultUri = await copyToVault(asset.uri, folderId, storedFilename);
+          } catch (copyErr) {
+            console.error('Failed to copy asset to vault:', copyErr);
+            copyErrors++;
+            continue;
+          }
           try {
             fileSizeBytes = new File(vaultUri).size ?? 0;
           } catch {
@@ -99,7 +106,15 @@ export default function useMediaImport(folderId: string) {
         });
       }
 
-      await addMediaBatch(batch);
+      if (batch.length > 0) {
+        await addMediaBatch(batch);
+      }
+      if (copyErrors > 0) {
+        Alert.alert(
+          'Import Incomplete',
+          `${copyErrors} file${copyErrors > 1 ? 's' : ''} could not be imported. The rest were saved successfully.`,
+        );
+      }
 
       // Delete originals — lock stays suppressed so any OS-level confirmation
       // dialog (iOS 14+ / Android 11+) doesn't trigger a vault lock mid-flow.
