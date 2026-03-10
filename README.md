@@ -5,6 +5,7 @@ A private, PIN-locked photo and video vault built with React Native and Expo. St
 ## Features
 
 - **PIN protection** — 6-digit PIN stored in iOS Keychain / Android Keystore via `expo-secure-store`. Auto-locks when the app backgrounds.
+- **Decoy mode (false vault)** — A separate "false password" opens an empty ephemeral vault, hiding the real contents. The app opens as a "World Time" clock; long-pressing the title reveals the PIN screen.
 - **Folders** — Create, rename, delete, and set cover photos for your media folders.
 - **Import media** — Pick photos and videos from your gallery; files are copied into the app's private directory and removed from the picker view.
 - **Media viewer** — Swipe horizontally through media, with a back button and swipe-down-to-close gesture.
@@ -13,6 +14,7 @@ A private, PIN-locked photo and video vault built with React Native and Expo. St
 - **Rotation** — Rotate photos and videos 90° at a time without cropping.
 - **Slideshow** — Auto-advance slideshow with configurable slide duration (2s / 3s / 4s / 5s / 10s).
 - **Sort & Filter** — Sort by date or name; filter by media type (photos/videos) or search by name.
+- **Swipe-to-select** — Long-press to enter selection mode, then drag to bulk-select items for delete/move.
 - **Unhide** — Save any vaulted item back to your device gallery.
 - **Move** — Move media items between folders.
 - **Share** — Share any photo or video directly from the viewer.
@@ -40,34 +42,37 @@ vault-app/
 ├── app.json                       # Expo config, permissions, plugins
 ├── src/
 │   ├── navigation/
-│   │   ├── RootNavigator.tsx      # Stack navigator (Lock → Home → Folder → Viewer)
+│   │   ├── RootNavigator.tsx      # Stack navigator (Splash → Lock → Home → Folder → Viewer)
 │   │   └── MainTabs.tsx           # Bottom tabs (Home + Settings)
 │   ├── context/
-│   │   ├── AuthContext.tsx        # Authentication state, lock/unlock, suppress-lock
-│   │   ├── VaultContext.tsx       # Folders & media CRUD, move, rotate, cover
-│   │   └── SettingsContext.tsx    # Persisted app settings (slideshow interval)
+│   │   ├── AuthContext.tsx        # Authentication state, lock/unlock, false mode, suppress-lock
+│   │   ├── VaultContext.tsx       # Folders & media CRUD, move, rotate, cover; dual real/false vault state
+│   │   └── SettingsContext.tsx    # Persisted settings (slideshow interval, long-press delay, false password)
 │   ├── screens/
-│   │   ├── LockScreen.tsx         # PIN entry with lockout timer
+│   │   ├── SplashScreen.tsx       # Decoy "World Time" clock; long-press title → PIN screen
+│   │   ├── LockScreen.tsx         # PIN entry with lockout timer (5 attempts → 30s)
 │   │   ├── SetupPinScreen.tsx     # First-run PIN creation + confirmation
-│   │   ├── ChangePinScreen.tsx    # Change existing PIN
-│   │   ├── HomeScreen.tsx         # Folder grid
-│   │   ├── FolderScreen.tsx       # Media grid with sort/filter
-│   │   ├── MediaViewerScreen.tsx  # Full-screen photo/video viewer + seek bar
-│   │   └── SettingsScreen.tsx     # Security, slideshow, storage, about
+│   │   ├── ChangePinScreen.tsx    # Change existing PIN (3-step: verify → new → confirm)
+│   │   ├── HomeScreen.tsx         # Folder grid with swipe-to-select + bulk ops
+│   │   ├── FolderScreen.tsx       # Media grid with sort/filter + swipe-to-select
+│   │   ├── MediaViewerScreen.tsx  # Full-screen photo/video viewer, seek bar, slideshow
+│   │   └── SettingsScreen.tsx     # Security, slideshow, long-press delay, storage stats
 │   ├── components/
 │   │   ├── pin/PinPad.tsx         # 3×4 digit grid
 │   │   ├── pin/PinDots.tsx        # PIN dot indicator with shake animation
 │   │   ├── folder/FolderCard.tsx  # Folder thumbnail card
 │   │   ├── folder/CreateFolderModal.tsx
 │   │   ├── folder/FolderActionsSheet.tsx
-│   │   ├── media/MediaThumbnail.tsx  # Thumbnail with video overlay + duration
-│   │   └── media/MediaActionsSheet.tsx
+│   │   ├── media/MediaThumbnail.tsx     # Thumbnail with video overlay + duration badge
+│   │   ├── media/MediaActionsSheet.tsx
+│   │   ├── media/MediaPickerModal.tsx   # Native gallery picker UI
+│   │   └── common/OnboardingModal.tsx   # First-run onboarding shown in SplashScreen
 │   ├── services/
 │   │   ├── pinService.ts          # SecureStore: save, verify, check PIN
-│   │   ├── fileService.ts         # FileSystem: copy, move, delete vault files
+│   │   ├── fileService.ts         # FileSystem: copy, move, delete vault files; Android external storage fallback
 │   │   └── metadataService.ts     # AsyncStorage: load/save folders & media
 │   ├── hooks/
-│   │   └── useMediaImport.ts      # Orchestrates picker → copy → context update
+│   │   └── useMediaImport.ts      # Orchestrates picker → URI resolution → copy → context update
 │   ├── types/index.ts
 │   └── utils/generateId.ts
 ```
@@ -153,5 +158,7 @@ git push origin v1.2.0   # ← this triggers the build
 ## Security Notes
 
 - The PIN is never stored in AsyncStorage — only in the OS secure enclave (`expo-secure-store`).
-- All media files are stored in the app's `documentDirectory`, which is sandboxed and inaccessible to other apps.
+- All media files are stored in the app's sandboxed directory (inaccessible to other apps). On Android, the app first tries external app-specific storage (`/Android/data/{pkg}/files/vault/`) for Files app visibility, falling back to internal `documentDirectory`.
+- A `.nomedia` file is placed in the vault root to prevent the system gallery scanner from indexing vault contents.
 - The vault auto-locks whenever the app moves to the background.
+- The false password opens an ephemeral decoy vault with no real data — contents are never persisted and reset each session.

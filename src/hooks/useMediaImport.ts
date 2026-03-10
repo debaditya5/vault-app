@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
 import { useVault } from '../context/VaultContext';
 import { useAuth } from '../context/AuthContext';
@@ -8,60 +8,69 @@ import { MediaItem } from '../types';
 import { copyToVault } from '../services/fileService';
 import { generateId } from '../utils/generateId';
 
-function getExtension(uri: string, mimeType?: string): string {
-  if (mimeType) {
-    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
-    if (mimeType.includes('png')) return 'png';
-    if (mimeType.includes('gif')) return 'gif';
-    if (mimeType.includes('webp')) return 'webp';
-    if (mimeType.includes('mp4')) return 'mp4';
-    if (mimeType.includes('mov') || mimeType.includes('quicktime')) return 'mov';
-  }
-  const parts = uri.split('.');
+function getExtension(filename: string): string {
+  const parts = filename.split('.');
   if (parts.length > 1) return parts[parts.length - 1].split('?')[0].toLowerCase();
   return 'jpg';
 }
 
+function mimeFromFilename(filename: string, mediaType: string): string {
+  const ext = getExtension(filename);
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+    heic: 'image/heic', heif: 'image/heif',
+    mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/mp4',
+  };
+  return map[ext] ?? (mediaType === 'video' ? 'video/mp4' : 'image/jpeg');
+}
+
+function restoreLockAfterPicker(restoreLock: () => void) {
+  let restored = false;
+  const doRestore = () => {
+    if (restored) return;
+    restored = true;
+    restoreLock();
+    sub.remove();
+  };
+  const sub = AppState.addEventListener('change', (s) => {
+    if (s === 'active') doRestore();
+  });
+  if (AppState.currentState === 'active') {
+    // Android: delay to let lingering inactive transitions settle
+    setTimeout(doRestore, Platform.OS === 'android' ? 600 : 0);
+  }
+}
+
 export default function useMediaImport(folderId: string) {
   const { addMediaBatch } = useVault();
-  const { suppressLock, restoreLock, isFalseMode } = useAuth();
+  const { suppressLock, restoreLock, lock, isFalseMode } = useAuth();
   const [isImporting, setIsImporting] = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const importMedia = async () => {
-    // Suppress lock before anything async — requestMediaLibraryPermissionsAsync
-    // can briefly send the app inactive on Android (permission dialog), which
-    // would fire the lock before we even open the picker.
     suppressLock();
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status !== 'granted') {
       restoreLock();
+      Alert.alert(
+        'Photos Access Required',
+        'Please enable photo library access for this app in your device Settings.',
+      );
       return;
     }
+    setPickerVisible(true);
+  };
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'] as ImagePicker.MediaType[],
-      allowsMultipleSelection: true,
-      quality: 1,
-      exif: false,
-    });
+  const handlePickerCancel = () => {
+    setPickerVisible(false);
+    restoreLockAfterPicker(restoreLock);
+  };
 
-    if (result.canceled || !result.assets?.length) {
-      // Wait for 'active' state (same strategy as the success path) so any
-      // trailing inactive transitions from the picker settling don't fire a lock.
-      let restored = false;
-      const doRestore = () => {
-        if (restored) return;
-        restored = true;
-        restoreLock();
-        cancelSub.remove();
-      };
-      const cancelSub = AppState.addEventListener('change', (s) => {
-        if (s === 'active') doRestore();
-      });
-      if (AppState.currentState === 'active') {
-        setTimeout(doRestore, 600);
-      }
+  const handlePickerImport = async (assets: MediaLibrary.Asset[]) => {
+    setPickerVisible(false);
+    if (!assets.length) {
+      restoreLockAfterPicker(restoreLock);
       return;
     }
 
@@ -70,9 +79,10 @@ export default function useMediaImport(folderId: string) {
       const batch: MediaItem[] = [];
       let copyErrors = 0;
 
-      for (const asset of result.assets) {
+      for (const asset of assets) {
         const mediaId = generateId();
-        const ext = getExtension(asset.uri, asset.mimeType ?? undefined);
+        const ext = getExtension(asset.filename);
+        const mimeType = mimeFromFilename(asset.filename, asset.mediaType);
 
         let vaultUri: string;
         let fileSizeBytes = 0;
@@ -80,12 +90,20 @@ export default function useMediaImport(folderId: string) {
         if (isFalseMode) {
           vaultUri = asset.uri;
         } else {
-          // Store with the media ID as filename, keeping the original extension
+          // Resolve ph:// / content:// → file:// so copyToVault can read it
+          let fileUri = asset.uri;
+          try {
+            const info = await MediaLibrary.getAssetInfoAsync(asset);
+            if (info.localUri) fileUri = info.localUri;
+          } catch {
+            // fall back to original uri
+          }
+
           const storedFilename = `${mediaId}.${ext}`;
           try {
-            vaultUri = await copyToVault(asset.uri, folderId, storedFilename);
-          } catch (copyErr) {
-            console.error('Failed to copy asset to vault:', copyErr);
+            vaultUri = await copyToVault(fileUri, folderId, storedFilename);
+          } catch (err) {
+            console.error('Failed to copy asset to vault:', err);
             copyErrors++;
             continue;
           }
@@ -99,56 +117,44 @@ export default function useMediaImport(folderId: string) {
         batch.push({
           id: mediaId,
           folderId,
-          fileName: asset.fileName ?? `${mediaId}.${ext}`,
+          fileName: asset.filename || `${mediaId}.${ext}`,
           vaultUri,
-          mediaType: asset.type === 'video' ? 'video' : 'photo',
-          mimeType: asset.mimeType ?? `image/${ext}`,
+          mediaType: asset.mediaType === 'video' ? 'video' : 'photo',
+          mimeType,
           width: asset.width ?? 0,
           height: asset.height ?? 0,
-          duration: asset.duration != null ? asset.duration / 1000 : undefined,
+          duration: asset.duration > 0 ? asset.duration : undefined, // MediaLibrary gives seconds
           importedAt: new Date().toISOString(),
           fileSizeBytes,
         });
       }
 
-      if (batch.length > 0) {
-        await addMediaBatch(batch);
-      }
+      if (batch.length > 0) await addMediaBatch(batch);
       if (copyErrors > 0) {
         Alert.alert(
           'Import Incomplete',
           `${copyErrors} file${copyErrors > 1 ? 's' : ''} could not be imported. The rest were saved successfully.`,
         );
       }
-
     } finally {
-      // On Android, the picker and delete dialog cause lingering inactive state
-      // transitions that can fire AFTER the async operation resolves. If we restore
-      // the lock while those transitions are still pending, the AppState listener
-      // in App.tsx will see an unsuppressed inactive event and lock the vault.
-      // Use a deduped restore: subscribe to the next 'active' event, and on Android
-      // also add a timeout fallback in case we're already in 'active' state.
-      let restored = false;
-      const doRestore = () => {
-        if (restored) return;
-        restored = true;
-        restoreLock();
-        stateSub.remove();
-      };
-      const stateSub = AppState.addEventListener('change', (state) => {
-        if (state === 'active') doRestore();
-      });
-      if (AppState.currentState === 'active') {
-        if (Platform.OS === 'android') {
-          // Delay so any trailing inactive transitions from the picker/dialog settle first
-          setTimeout(doRestore, 600);
-        } else {
-          doRestore();
-        }
-      }
+      restoreLockAfterPicker(restoreLock);
       setIsImporting(false);
     }
   };
 
-  return { importMedia, isImporting };
+  // If the user backgrounds the app while the picker is open, close the picker
+  // and restore the lock so the normal splash/lock flow fires on return.
+  useEffect(() => {
+    if (!pickerVisible) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        setPickerVisible(false);
+        restoreLock(); // clear suppression
+        lock();        // force lock — AppInner already missed this event while suppressed
+      }
+    });
+    return () => sub.remove();
+  }, [pickerVisible]);
+
+  return { importMedia, isImporting, pickerVisible, handlePickerCancel, handlePickerImport };
 }

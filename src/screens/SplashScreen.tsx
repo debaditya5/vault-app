@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useSettings } from '../context/SettingsContext';
+import OnboardingModal from '../components/common/OnboardingModal';
 
 type Nav = StackNavigationProp<RootStackParamList>;
 
@@ -195,6 +196,7 @@ export default function SplashScreen() {
 
   return (
     <View style={styles.container}>
+      <OnboardingModal onDone={() => {}} />
 
       {/* ── Header ── */}
       <View style={styles.header}>

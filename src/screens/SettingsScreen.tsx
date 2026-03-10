@@ -12,7 +12,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { vaultRootPath } from '../services/fileService';
 import { useAuth } from '../context/AuthContext';
 import { useVault } from '../context/VaultContext';
 import { useSettings } from '../context/SettingsContext';
@@ -49,7 +48,7 @@ const LONG_PRESS_OPTIONS = [
 export default function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const tabNavigation = useNavigation<TabNav>();
-  const { lock, isFalseMode } = useAuth();
+  const { isFalseMode } = useAuth();
 
   const swipePanResponder = useRef(
     PanResponder.create({
@@ -79,8 +78,6 @@ export default function SettingsScreen() {
     return { totalItems, totalBytes, folderCount: folders.length };
   }, [folders, mediaByFolder]);
 
-  const vaultPath = vaultRootPath();
-
   return (
     <View style={styles.container} {...swipePanResponder.panHandlers}>
     <SafeAreaView style={styles.container}>
@@ -100,12 +97,6 @@ export default function SettingsScreen() {
               <Text style={styles.rowSublabel}>Update your 6-digit vault PIN</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.row, styles.rowBorder]} onPress={lock} activeOpacity={0.6}>
-            <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>Lock Vault</Text>
-              <Text style={styles.rowSublabel}>Return to lock screen immediately</Text>
-            </View>
           </TouchableOpacity>
           {/* False password — hidden when in false mode to avoid detection */}
           {!isFalseMode && (
@@ -188,15 +179,9 @@ export default function SettingsScreen() {
             <View style={styles.rowContent}><Text style={styles.rowLabel}>Total Items</Text></View>
             <Text style={styles.rowValue}>{storageStats.totalItems}</Text>
           </View>
-          <View style={[styles.row, styles.rowBorder]}>
+          <View style={styles.row}>
             <View style={styles.rowContent}><Text style={styles.rowLabel}>Space Used</Text></View>
             <Text style={styles.rowValue}>{formatBytes(storageStats.totalBytes)}</Text>
-          </View>
-          <View style={styles.row}>
-            <View style={styles.rowContent}>
-              <Text style={styles.rowLabel}>Storage Location</Text>
-              <Text style={styles.pathText} numberOfLines={3} selectable>{vaultPath}</Text>
-            </View>
           </View>
         </View>
 
@@ -232,8 +217,6 @@ const styles = StyleSheet.create({
   rowSublabel: { color: '#888', fontSize: 13, marginTop: 2 },
   rowValue: { color: '#888', fontSize: 15 },
   chevron: { color: '#666', fontSize: 20, marginLeft: 8 },
-  pathText: { color: '#0a84ff', fontSize: 12, marginTop: 4, fontFamily: 'monospace', lineHeight: 18 },
-
   // Slideshow duration chips
   durationRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' },
   durationChip: {
@@ -243,8 +226,6 @@ const styles = StyleSheet.create({
   durationChipActive: { backgroundColor: '#0a84ff' },
   durationChipText: { color: '#888', fontSize: 13, fontWeight: '500' },
   durationChipTextActive: { color: '#fff', fontWeight: '700' },
-
-  mono: { fontFamily: 'monospace', color: '#0a84ff' },
 
   // False password input
   falsePwInput: {

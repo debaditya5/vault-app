@@ -23,6 +23,8 @@ import MediaThumbnail from '../components/media/MediaThumbnail';
 import MediaActionsSheet from '../components/media/MediaActionsSheet';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { MediaItem } from '../types';
+import { applyVideoRotationForExport } from '../utils/applyExportRotation';
+import MediaPickerModal from '../components/media/MediaPickerModal';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import useMediaImport from '../hooks/useMediaImport';
 
@@ -47,7 +49,7 @@ export default function FolderScreen() {
   const route = useRoute<Route>();
   const { folder } = route.params;
   const { mediaByFolder, deleteMediaBatch, folders, moveMediaBatch } = useVault();
-  const { importMedia, isImporting } = useMediaImport(folder.id);
+  const { importMedia, isImporting, pickerVisible, handlePickerCancel, handlePickerImport } = useMediaImport(folder.id);
 
   // ── Select mode ────────────────────────────────────────────────────────────
   const [isSelecting, setIsSelecting] = useState(false);
@@ -204,12 +206,23 @@ export default function FolderScreen() {
     for (const item of selectedItems) {
       let tempUri: string | null = null;
       try {
-        let uriToSave = item.vaultUri;
-        if (Platform.OS === 'android') {
+        const rotation = item.rotation ?? 0;
+        const isRotatedVideo = item.mediaType === 'video' && rotation !== 0;
+
+        let uriToSave: string;
+        if (isRotatedVideo) {
+          // Patch the MP4 tkhd matrix so the exported file carries the rotation.
+          tempUri = Paths.cache.uri + item.id + '_export_' + item.fileName;
+          await applyVideoRotationForExport(item.vaultUri, rotation, tempUri);
+          uriToSave = tempUri;
+        } else if (Platform.OS === 'android') {
           tempUri = Paths.cache.uri + item.id + '_' + item.fileName;
           await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
           uriToSave = tempUri;
+        } else {
+          uriToSave = item.vaultUri;
         }
+
         await MediaLibrary.createAssetAsync(uriToSave);
         toDelete.push(item);
       } catch (e: any) {
@@ -370,6 +383,12 @@ export default function FolderScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      <MediaPickerModal
+        visible={pickerVisible}
+        onCancel={handlePickerCancel}
+        onImport={handlePickerImport}
+      />
 
       {/* Import FAB */}
       {!isSelecting && (
