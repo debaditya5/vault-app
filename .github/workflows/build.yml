@@ -20,23 +20,22 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - run: npm ci --quiet 2>&1 | grep -v "^npm warn" || true
+      - run: npm ci
 
-      - run: npm install -g eas-cli firebase-tools --silent
+      - run: npm install -g eas-cli firebase-tools
 
       - name: Build APK (EAS server)
-        run: eas build --platform android --profile preview --non-interactive 2>&1 | grep -iv "warn\|deprecat"
+        run: eas build --platform android --profile preview --non-interactive
 
       - name: Download APK
         run: |
-          APK_URL=$(eas build:list --platform android --status finished --limit 1 --json --non-interactive 2>/dev/null | jq -r '.[0].artifacts.buildUrl')
-          curl -sL -o TimeMatrix.apk "$APK_URL"
+          APK_URL=$(eas build:list --platform android --status finished --limit 1 --json --non-interactive | jq -r '.[0].artifacts.buildUrl')
+          curl -L -o TimeMatrix.apk "$APK_URL"
 
       - name: Upload to Firebase App Distribution
         run: |
           firebase appdistribution:distribute TimeMatrix.apk \
             --app ${{ secrets.FIREBASE_APP_ID }} \
-            --release-notes "Build from ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)" \
-            2>&1 | grep -v "^\[debug\]" || true
+            --release-notes "Build from ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)"
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
