@@ -25,7 +25,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npm install -g eas-cli firebase-tools
+      - run: npm install -g eas-cli firebase-tools --silent
 
       - name: Build APK (local — no EAS queue)
         run: eas build --platform android --profile preview --local --output TimeMatrix.apk --non-interactive
