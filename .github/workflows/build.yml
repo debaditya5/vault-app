@@ -1,0 +1,39 @@
+name: EAS Build & Distribute
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build & Upload to Firebase
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci --quiet 2>&1 | grep -v "^npm warn" || true
+
+      - run: npm install -g eas-cli firebase-tools --silent
+
+      - name: Build APK (EAS server)
+        run: |
+          APK_URL=$(eas build --platform android --profile preview --json --non-interactive 2>/dev/null | jq -r '.[0].artifacts.buildUrl')
+          curl -sL -o TimeMatrix.apk "$APK_URL"
+
+      - name: Upload to Firebase App Distribution
+        run: |
+          firebase appdistribution:distribute TimeMatrix.apk \
+            --app ${{ secrets.FIREBASE_APP_ID }} \
+            --release-notes "Build from ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)" \
+            2>&1 | grep -v "^\[debug\]" || true
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
