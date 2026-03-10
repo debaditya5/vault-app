@@ -28,11 +28,11 @@ jobs:
       - run: npm install -g eas-cli firebase-tools
 
       - name: Build APK (local — no EAS queue)
-        run: eas build --platform android --profile preview --local --output app-release.apk --non-interactive
+        run: eas build --platform android --profile preview --local --output TimeMatrix.apk --non-interactive
 
       - name: Upload to Firebase App Distribution
         run: |
-          firebase appdistribution:distribute app-release.apk \
+          firebase appdistribution:distribute TimeMatrix.apk \
             --app ${{ secrets.FIREBASE_APP_ID }} \
             --release-notes "Build from ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)"
         env:
