@@ -91,13 +91,22 @@ npm install
 
 ### Run
 
+> **Expo Go will not work.** This app uses native plugins (`expo-secure-store`, `expo-video`, `expo-media-library`, `expo-image-picker`) that require a **development build**. The dev server emits an `exp+vault-app://` scheme QR code that Expo Go cannot open.
+
+**Step 1 — Build and install the dev client** (one-time per device/simulator):
+
+```bash
+npx expo run:ios       # iOS simulator or connected iPhone
+npx expo run:android   # Android emulator or connected device
+```
+
+**Step 2 — Start the dev server** (subsequent runs):
+
 ```bash
 npx expo start
 ```
 
-Scan the QR code with the **Expo Go** app on your device.
-
-> **Note:** Some features (file system access, secure store, media library) require a physical device or a development build. They will not work correctly in Expo Go on a simulator.
+Scan the QR code with the **Vault dev client** that was installed in Step 1 (not Expo Go).
 
 ## CI/CD — Tag-based Builds
 
