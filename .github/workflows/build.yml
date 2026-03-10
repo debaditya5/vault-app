@@ -1,4 +1,4 @@
-name: EAS Build
+name: EAS Build & Distribute
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Android APK (Preview)
+    name: Build & Upload to Firebase
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -32,8 +32,22 @@ jobs:
       - name: Build APK
         run: eas build --platform android --profile preview --non-interactive
 
-      - name: Get build URL
+      - name: Get APK download URL
         run: |
           BUILD_URL=$(eas build:list --platform android --status finished --limit 1 --json --non-interactive | jq -r '.[0].artifacts.buildUrl')
-          echo "## Android Build Ready" >> $GITHUB_STEP_SUMMARY
-          echo "Download APK: $BUILD_URL" >> $GITHUB_STEP_SUMMARY
+          echo "BUILD_URL=$BUILD_URL" >> $GITHUB_ENV
+
+      - name: Download APK
+        run: wget -O app-release.apk "$BUILD_URL"
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Upload to Firebase App Distribution
+        run: |
+          firebase appdistribution:distribute app-release.apk \
+            --app ${{ secrets.FIREBASE_APP_ID }} \
+            --groups "testers" \
+            --release-notes "Build from ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)"
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
