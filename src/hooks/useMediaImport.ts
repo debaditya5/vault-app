@@ -29,10 +29,17 @@ export default function useMediaImport(folderId: string) {
   const [isImporting, setIsImporting] = useState(false);
 
   const importMedia = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
-
+    // Suppress lock before anything async — requestMediaLibraryPermissionsAsync
+    // can briefly send the app inactive on Android (permission dialog), which
+    // would fire the lock before we even open the picker.
     suppressLock();
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      restoreLock();
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images', 'videos'] as ImagePicker.MediaType[],
       allowsMultipleSelection: true,
@@ -41,12 +48,20 @@ export default function useMediaImport(folderId: string) {
     });
 
     if (result.canceled || !result.assets?.length) {
-      // On Android, picker returning can still have trailing inactive transitions;
-      // use the same deferred restore to avoid a spurious lock on cancel.
-      if (Platform.OS === 'android') {
-        setTimeout(restoreLock, 600);
-      } else {
+      // Wait for 'active' state (same strategy as the success path) so any
+      // trailing inactive transitions from the picker settling don't fire a lock.
+      let restored = false;
+      const doRestore = () => {
+        if (restored) return;
+        restored = true;
         restoreLock();
+        cancelSub.remove();
+      };
+      const cancelSub = AppState.addEventListener('change', (s) => {
+        if (s === 'active') doRestore();
+      });
+      if (AppState.currentState === 'active') {
+        setTimeout(doRestore, 600);
       }
       return;
     }

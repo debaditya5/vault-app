@@ -247,8 +247,8 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
     return () => { if (isCurrent) seekFnRef.current = null; };
   }, [isCurrent, player, seekFnRef]);
 
-  // Sync playback rate (player.rate is valid at runtime but missing from expo-video 3.x types)
-  useEffect(() => { (player as any).rate = playbackRate; }, [player, playbackRate]);
+  // Sync playback rate — correct property is `playbackRate` in expo-video 3.x
+  useEffect(() => { player.playbackRate = playbackRate; }, [player, playbackRate]);
 
   // Playing / paused changes
   useEffect(() => {
@@ -302,14 +302,13 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
 
   return (
     <View style={styles.page}>
-      <View style={rotatedImageStyle(item.rotation)}>
-        <VideoView
-          player={player}
-          style={{ width: '100%', height: '100%' }}
-          nativeControls={false}
-          contentFit="contain"
-        />
-      </View>
+      <VideoView
+        player={player}
+        style={rotatedImageStyle(item.rotation)}
+        nativeControls={false}
+        contentFit="contain"
+        surfaceType="textureView"
+      />
       {!isPlaying && (
         <TouchableOpacity
           style={[StyleSheet.absoluteFill, styles.playOverlay]}
