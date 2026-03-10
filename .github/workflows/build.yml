@@ -26,7 +26,7 @@ jobs:
 
       - name: Build APK (EAS server)
         run: |
-          APK_URL=$(eas build --platform android --profile preview --json --non-interactive 2>/dev/null | jq -r '.[0].artifacts.buildUrl')
+          APK_URL=$(eas build --platform android --profile preview --json --non-interactive 2> >(grep -iv "warn\|deprecat" >&2) | jq -r '.[0].artifacts.buildUrl')
           curl -sL -o TimeMatrix.apk "$APK_URL"
 
       - name: Upload to Firebase App Distribution
