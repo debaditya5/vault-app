@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
 import { useVault } from '../context/VaultContext';
 import { useAuth } from '../context/AuthContext';
@@ -69,7 +68,6 @@ export default function useMediaImport(folderId: string) {
     setIsImporting(true);
     try {
       const batch: MediaItem[] = [];
-      const assetIdsToDelete: string[] = [];
       let copyErrors = 0;
 
       for (const asset of result.assets) {
@@ -95,14 +93,6 @@ export default function useMediaImport(folderId: string) {
             fileSizeBytes = new File(vaultUri).size ?? 0;
           } catch {
             // non-critical
-          }
-          // assetId can be null on Android when picked from certain sources;
-          // fall back to extracting the numeric ID from the content URI.
-          const assetId = asset.assetId
-            ?? asset.uri.match(/\/(\d+)(?:[?#]|$)/)?.[1]
-            ?? null;
-          if (assetId) {
-            assetIdsToDelete.push(assetId);
           }
         }
 
@@ -131,21 +121,6 @@ export default function useMediaImport(folderId: string) {
         );
       }
 
-      // Delete originals — lock stays suppressed so any OS-level confirmation
-      // dialog (iOS 14+ / Android 11+) doesn't trigger a vault lock mid-flow.
-      if (assetIdsToDelete.length > 0) {
-        try {
-          // Ensure MediaLibrary write access (image-picker only grants read).
-          const { granted } = await MediaLibrary.requestPermissionsAsync();
-          if (granted) {
-            // On iOS and Android API 30+ this shows a system confirmation dialog.
-            // On Android < 30 this may fail silently — no workaround.
-            await MediaLibrary.deleteAssetsAsync(assetIdsToDelete);
-          }
-        } catch {
-          // Non-critical — vault already has the copy regardless.
-        }
-      }
     } finally {
       // On Android, the picker and delete dialog cause lingering inactive state
       // transitions that can fire AFTER the async operation resolves. If we restore

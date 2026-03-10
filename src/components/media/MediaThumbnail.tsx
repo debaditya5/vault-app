@@ -55,7 +55,12 @@ export default function MediaThumbnail({ item, onPress, onLongPress }: MediaThum
       activeOpacity={0.8}
     >
       {thumbUri ? (
-        <Image source={{ uri: thumbUri }} style={styles.image} resizeMode="cover" {...({ contextMenuHidden: true } as any)} />
+        <Image
+          source={{ uri: thumbUri }}
+          style={[styles.image, item.rotation ? { transform: [{ rotate: `${item.rotation}deg` }] } : undefined]}
+          resizeMode="cover"
+          {...({ contextMenuHidden: true } as any)}
+        />
       ) : (
         <View style={[styles.image, styles.placeholder]} />
       )}

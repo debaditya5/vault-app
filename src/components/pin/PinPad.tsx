@@ -78,6 +78,6 @@ const styles = StyleSheet.create({
   keyText: {
     color: '#fff',
     fontSize: 26,
-    fontWeight: '400',
+    fontWeight: '600',
   },
 });

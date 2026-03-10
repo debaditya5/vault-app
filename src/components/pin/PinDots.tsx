@@ -54,11 +54,9 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#fff',
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   dotFilled: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
   },
 });

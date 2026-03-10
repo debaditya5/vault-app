@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,17 +6,21 @@ import {
   StyleSheet,
   ScrollView,
   TextInput,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { vaultRootPath } from '../services/fileService';
 import { useAuth } from '../context/AuthContext';
 import { useVault } from '../context/VaultContext';
 import { useSettings } from '../context/SettingsContext';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { TabParamList } from '../navigation/MainTabs';
 
 type Nav = StackNavigationProp<RootStackParamList>;
+type TabNav = BottomTabNavigationProp<TabParamList>;
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -44,7 +48,18 @@ const LONG_PRESS_OPTIONS = [
 
 export default function SettingsScreen() {
   const navigation = useNavigation<Nav>();
+  const tabNavigation = useNavigation<TabNav>();
   const { lock, isFalseMode } = useAuth();
+
+  const swipePanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, { dx, dy }) =>
+        dx > 20 && Math.abs(dx) > Math.abs(dy) * 2,
+      onPanResponderRelease: (_, { dx }) => {
+        if (dx > 60) tabNavigation.navigate('Home');
+      },
+    })
+  ).current;
   const { folders, mediaByFolder } = useVault();
   const { slideshowInterval, setSlideshowInterval, longPressDelay, setLongPressDelay, falsePassword, setFalsePassword } = useSettings();
 
@@ -67,6 +82,7 @@ export default function SettingsScreen() {
   const vaultPath = vaultRootPath();
 
   return (
+    <View style={styles.container} {...swipePanResponder.panHandlers}>
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.heading}>Settings</Text>
@@ -196,6 +212,7 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+    </View>
   );
 }
 

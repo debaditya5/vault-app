@@ -1,18 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, PanResponder } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import PinPad from '../components/pin/PinPad';
 import PinDots from '../components/pin/PinDots';
 import { verifyPin } from '../services/pinService';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import { RootStackParamList } from '../navigation/RootNavigator';
+
+type Nav = StackNavigationProp<RootStackParamList>;
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_SECONDS = 30;
 
 export default function LockScreen() {
+  const navigation = useNavigation<Nav>();
   const { unlock, unlockFalse } = useAuth();
   const { falsePassword } = useSettings();
+
+  const swipePanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, { dx, dy }) =>
+        dx > 20 && Math.abs(dx) > Math.abs(dy) * 2,
+      onPanResponderRelease: (_, { dx }) => {
+        if (dx > 60) navigation.replace('Splash');
+      },
+    })
+  ).current;
 
   const [input, setInput] = useState('');
   const [shake, setShake] = useState(false);
@@ -82,7 +98,7 @@ export default function LockScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} {...swipePanResponder.panHandlers}>
       <View style={styles.content}>
         <Text style={styles.lockIcon}>🔒</Text>
         <Text style={styles.title}>Vault Locked</Text>
