@@ -2,8 +2,18 @@ name: EAS Build & Distribute
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'EAS build profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
 
 jobs:
   build:
@@ -28,12 +38,12 @@ jobs:
       - run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
 
       - name: Build APK (local)
-        run: eas build --platform android --profile preview --local --output TimeMatrix.apk --non-interactive
+        run: eas build --platform android --profile ${{ github.event.inputs.profile || 'preview' }} --local --output TimeMatrix.apk --non-interactive
 
       - name: Upload to Firebase App Distribution
         run: |
           firebase appdistribution:distribute TimeMatrix.apk \
             --app ${{ secrets.FIREBASE_APP_ID }} \
-            --release-notes "Build from ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)"
+            --release-notes "Release ${{ github.ref_name }} @ $(echo ${{ github.sha }} | cut -c1-7)"
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

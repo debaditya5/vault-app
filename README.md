@@ -27,7 +27,7 @@ A private, PIN-locked photo and video vault built with React Native and Expo. St
 | `expo-secure-store` | PIN storage (Keychain/Keystore) |
 | `expo-file-system` | Copy/move/delete files in sandboxed storage |
 | `expo-image-picker` | Media selection from gallery |
-| `expo-av` | Video playback |
+| `expo-video` | Video playback (migrated from deprecated expo-av) |
 | `expo-video-thumbnails` | Video thumbnail generation |
 | `expo-media-library` | Save media back to device gallery |
 | `@react-native-async-storage/async-storage` | Folder & media metadata persistence |
@@ -76,8 +76,9 @@ vault-app/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - [Expo CLI](https://docs.expo.dev/get-started/installation/)
+- EAS CLI (`npm install -g eas-cli`) — for production builds
 - Physical device recommended (simulator has no real media library)
 
 ### Install
@@ -97,6 +98,48 @@ npx expo start
 Scan the QR code with the **Expo Go** app on your device.
 
 > **Note:** Some features (file system access, secure store, media library) require a physical device or a development build. They will not work correctly in Expo Go on a simulator.
+
+## CI/CD — Tag-based Builds
+
+Builds are **not triggered on every commit**. The pipeline runs only when:
+
+1. **A version tag is pushed** — format `v*` (e.g. `v1.0.0`, `v1.2.3`)
+2. **Manually dispatched** via the GitHub Actions UI (choose `preview` or `production` profile)
+
+### Releasing a new build
+
+```bash
+# Commit and push your changes normally — no build is triggered
+git add .
+git commit -m "feat: my new feature"
+git push
+
+# When ready to distribute, create and push a version tag
+git tag v1.2.0
+git push origin v1.2.0   # ← this triggers the build
+```
+
+### Pipeline steps
+
+1. Checkout + `npm ci`
+2. EAS local build → `TimeMatrix.apk` (Android `preview` profile by default)
+3. Upload to **Firebase App Distribution** with release notes showing the tag + commit SHA
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|---|---|
+| `EXPO_TOKEN` | Expo account token (account settings on expo.dev) |
+| `FIREBASE_APP_ID` | Firebase app ID from the Firebase console |
+| `FIREBASE_TOKEN` | Firebase CI token (`firebase login:ci`) |
+
+### EAS Build Profiles (`eas.json`)
+
+| Profile | Output | Use case |
+|---|---|---|
+| `development` | Internal distribution (dev client) | Local dev with Expo Dev Client |
+| `preview` | APK, internal distribution | Testers via Firebase App Distribution |
+| `production` | AAB, auto-increment version | Play Store submission |
 
 ## Security Notes
 
