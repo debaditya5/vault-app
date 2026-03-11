@@ -20,58 +20,89 @@ const NUM_COLS = 3;
 const CELL = Dimensions.get('window').width / NUM_COLS;
 const PAGE = 30; // smaller page = faster initial load
 
+// ── Persistent thumbnail cache (module-level — survives modal close/reopen) ───
+const thumbnailCache = new Map<string, string>();
+
+// ── Thumbnail generation queue (limits concurrent native calls) ────────────────
+const MAX_THUMB_CONCURRENT = 4;
+let thumbActive = 0;
+const thumbPending: Array<() => void> = [];
+
+function drainThumbQueue() {
+  while (thumbActive < MAX_THUMB_CONCURRENT && thumbPending.length > 0) {
+    thumbActive++;
+    thumbPending.shift()!();
+  }
+}
+
+function enqueueThumb(task: () => Promise<void>): () => void {
+  let cancelled = false;
+  const run = () => {
+    if (cancelled) { thumbActive--; drainThumbQueue(); return; }
+    task().finally(() => { thumbActive--; drainThumbQueue(); });
+  };
+  if (thumbActive < MAX_THUMB_CONCURRENT) { thumbActive++; run(); }
+  else { thumbPending.push(run); }
+  return () => { cancelled = true; };
+}
+
 // ── PickerThumb ───────────────────────────────────────────────────────────────
 // On iOS, ph:// URIs work for both photos and videos via the Photos framework.
 // On Android, content://video/media URIs are video files — Image can't render
 // them. Use expo-video-thumbnails to generate a frame thumbnail instead.
-//
-// The cache is passed in as a prop (session-scoped ref from MediaPickerModal)
-// so it is cleared on every open. This forces a fresh getThumbnailAsync call
-// each session, which correctly fails for assets deleted since last open.
 
 interface ThumbProps {
   asset: MediaLibrary.Asset;
   onRemove: () => void;
-  cache: Map<string, string>;
 }
 
-function PickerThumb({ asset, onRemove, cache }: ThumbProps) {
+function PickerThumb({ asset, onRemove }: ThumbProps) {
   const needsGen =
     Platform.OS === 'android' &&
     asset.mediaType === MediaLibrary.MediaType.video;
 
   const [thumbUri, setThumbUri] = useState<string | null>(
-    needsGen ? (cache.get(asset.id) ?? null) : asset.uri,
+    needsGen ? (thumbnailCache.get(asset.id) ?? null) : asset.uri,
   );
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!needsGen || cache.has(asset.id)) return;
+    if (!needsGen) return;
+    const cached = thumbnailCache.get(asset.id);
+    if (cached) { setThumbUri(cached); return; }
     let alive = true;
 
-    VideoThumbnails.getThumbnailAsync(asset.uri, { time: 0 })
-      .then(r => {
-        cache.set(asset.id, r.uri);
+    const cancel = enqueueThumb(async () => {
+      try {
+        const r = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 0, quality: 0.5 });
+        thumbnailCache.set(asset.id, r.uri);
         if (alive) setThumbUri(r.uri);
-      })
-      .catch(() => {
-        // Try resolving to a local file URI first
-        MediaLibrary.getAssetInfoAsync(asset)
-          .then(info =>
-            info.localUri
-              ? VideoThumbnails.getThumbnailAsync(info.localUri, { time: 0 })
-              : Promise.reject(),
-          )
-          .then(r => {
-            cache.set(asset.id, r.uri);
-            if (alive) setThumbUri(r.uri);
-          })
-          .catch(() => {
-            if (alive) onRemove(); // asset is gone / inaccessible
-          });
-      });
+      } catch {
+        try {
+          const info = await MediaLibrary.getAssetInfoAsync(asset);
+          if (!info.localUri) { if (alive) onRemove(); return; }
+          const r = await VideoThumbnails.getThumbnailAsync(info.localUri, { time: 0, quality: 0.5 });
+          thumbnailCache.set(asset.id, r.uri);
+          if (alive) setThumbUri(r.uri);
+        } catch {
+          if (alive) onRemove(); // asset is gone / inaccessible
+        }
+      }
+    });
 
-    return () => { alive = false; };
-  }, [asset.id]);
+    return () => { alive = false; cancel(); };
+  }, [asset.id, retryKey]);
+
+  const handleError = useCallback(() => {
+    if (needsGen && thumbnailCache.has(asset.id)) {
+      // Cached thumbnail file was cleared by the OS — evict and regenerate
+      thumbnailCache.delete(asset.id);
+      setThumbUri(null);
+      setRetryKey(k => k + 1);
+    } else {
+      onRemove();
+    }
+  }, [asset.id, needsGen, onRemove]);
 
   if (thumbUri === null) {
     return <View style={[styles.thumb, { backgroundColor: '#1a1a1a' }]} />;
@@ -81,7 +112,7 @@ function PickerThumb({ asset, onRemove, cache }: ThumbProps) {
     <Image
       source={{ uri: thumbUri }}
       style={styles.thumb}
-      onError={onRemove}
+      onError={handleError}
     />
   );
 }
@@ -103,9 +134,6 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
 
   const cursor = useRef<string | undefined>(undefined);
   const fetchingRef = useRef(false);
-  // Session-scoped thumbnail cache — reset on every open so deleted assets
-  // are never served from a stale cache entry.
-  const thumbCache = useRef(new Map<string, string>());
 
   // Swipe-select refs
   const listTop = useRef(0);
@@ -145,7 +173,7 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
   useEffect(() => {
     if (visible) {
       cursor.current = undefined;
-      thumbCache.current = new Map(); // clear so deleted assets aren't served from cache
+      thumbPending.length = 0; // discard stale queued tasks from previous open
       setSelected(new Set());
       setAssets([]);
       setHasMore(true);
@@ -251,7 +279,7 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
         delayLongPress={200}
         activeOpacity={0.85}
       >
-        <PickerThumb asset={item} onRemove={() => removeAsset(item.id)} cache={thumbCache.current} />
+        <PickerThumb asset={item} onRemove={() => removeAsset(item.id)} />
         {item.mediaType === MediaLibrary.MediaType.video && (
           <View style={styles.badge}>
             <Text style={styles.badgeIcon}>▶</Text>
@@ -308,7 +336,6 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
             initialNumToRender={12}
             maxToRenderPerBatch={12}
             windowSize={5}
-            removeClippedSubviews
             onEndReached={() => { if (hasMore && !fetchingRef.current) fetchPage(); }}
             onEndReachedThreshold={0.4}
             ListFooterComponent={loading
