@@ -77,6 +77,7 @@ export default function useMediaImport(folderId: string) {
     setIsImporting(true);
     try {
       const batch: MediaItem[] = [];
+      const assetsToDelete: MediaLibrary.Asset[] = [];
       let copyErrors = 0;
 
       for (const asset of assets) {
@@ -112,6 +113,9 @@ export default function useMediaImport(folderId: string) {
           } catch {
             // non-critical
           }
+
+          // Track for batch deletion — only assets successfully copied to vault
+          assetsToDelete.push(asset);
         }
 
         batch.push({
@@ -130,6 +134,21 @@ export default function useMediaImport(folderId: string) {
       }
 
       if (batch.length > 0) await addMediaBatch(batch);
+
+      // Delete originals from gallery in one batched MediaStore call.
+      // On iOS this triggers a single system confirmation sheet for the whole
+      // selection. On Android 10+ it uses MediaStore.createDeleteRequest
+      // (one dialog regardless of count). Much more efficient than per-file
+      // deletion and scales to any library size.
+      if (assetsToDelete.length > 0) {
+        try {
+          await MediaLibrary.deleteAssetsAsync(assetsToDelete);
+        } catch {
+          // Non-critical: files are already safely stored in the vault.
+          // User declined the system dialog or permission was denied.
+        }
+      }
+
       if (copyErrors > 0) {
         Alert.alert(
           'Import Incomplete',
