@@ -8,8 +8,8 @@ A private, PIN-locked photo and video vault built with React Native and Expo. St
 - **Decoy mode (false vault)** — A separate "false password" opens an empty ephemeral vault, hiding the real contents. The app opens as a "World Time" clock; long-pressing the title reveals the PIN screen.
 - **Folders** — Create, rename, delete, and set cover photos for your media folders.
 - **Import media** — Pick photos and videos from your gallery; files are copied into the app's private directory and removed from the picker view.
-- **Media viewer** — Swipe horizontally through media, with a back button and swipe-down-to-close gesture.
-- **Video playback** — Native video player with play/pause, a draggable seek bar, and current/total time display.
+- **Media viewer** — Full-screen photo/video viewer. Swipe horizontally to navigate items; swipe down to close. Tap to show/hide controls (auto-hides after 3s during playback).
+- **Video playback** — Native player with play/pause (tap), scrub-to-seek (drag left/right on the video), draggable seek bar with time display, auto-hiding controls, and playback speed selection (0.25× – 8× via the menu).
 - **Video thumbnails** — Auto-generated thumbnails with duration badge in the folder grid.
 - **Rotation** — Rotate photos and videos 90° at a time without cropping.
 - **Slideshow** — Auto-advance slideshow with configurable slide duration (2s / 3s / 4s / 5s / 10s).
@@ -55,7 +55,7 @@ vault-app/
 │   │   ├── ChangePinScreen.tsx    # Change existing PIN (3-step: verify → new → confirm)
 │   │   ├── HomeScreen.tsx         # Folder grid with swipe-to-select + bulk ops
 │   │   ├── FolderScreen.tsx       # Media grid with sort/filter + swipe-to-select
-│   │   ├── MediaViewerScreen.tsx  # Full-screen photo/video viewer, seek bar, slideshow
+│   │   ├── MediaViewerScreen.tsx  # Full-screen photo/video viewer; swipe-to-seek, speed control, auto-hide controls, slideshow
 │   │   └── SettingsScreen.tsx     # Security, slideshow, long-press delay, storage stats
 │   ├── components/
 │   │   ├── pin/PinPad.tsx         # 3×4 digit grid
