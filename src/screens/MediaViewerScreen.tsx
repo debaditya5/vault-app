@@ -13,6 +13,11 @@ import {
   PanResponder,
   Platform,
 } from 'react-native';
+import {
+  PanGestureHandler,
+  TapGestureHandler,
+  State,
+} from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { setStatusBarHidden, setStatusBarTranslucent } from 'expo-status-bar';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -204,9 +209,14 @@ interface VideoPageProps {
   onTap: () => void;
 }
 
+interface SeekInfo { delta: number; targetMs: number }
+
 function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate, controlsVisible, onTap }: VideoPageProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasEnded, setHasEnded] = useState(false);
+  const [seekInfo, setSeekInfo] = useState<SeekInfo | null>(null);
+  const [postSeek, setPostSeek] = useState(false);
+  const postSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable refs to avoid stale closures in event listeners
   const isCurrentRef = useRef(isCurrent);
@@ -214,8 +224,15 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
   const onProgressUpdateRef = useRef(onProgressUpdate);
   useEffect(() => { onProgressUpdateRef.current = onProgressUpdate; }, [onProgressUpdate]);
 
+  // Refs so handlers always see fresh values
+  const isPlayingRef = useRef(false);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  const hasEndedRef = useRef(false);
+  useEffect(() => { hasEndedRef.current = hasEnded; }, [hasEnded]);
+  const onTapRef = useRef(onTap);
+  useEffect(() => { onTapRef.current = onTap; }, [onTap]);
+
   // Seed duration from stored metadata so the seekbar shows immediately on open.
-  // statusChange/readyToPlay may fire while the item is off-screen (not current).
   const cachedDurRef = useRef(item.duration != null ? item.duration * 1000 : 0);
 
   const player = useVideoPlayer(item.vaultUri, (p) => {
@@ -223,19 +240,94 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
     p.timeUpdateEventInterval = 0.1;
   });
 
+  // ── Tap / double-tap ───────────────────────────────────────────────────────
+  const lastTapTimeRef = useRef(0);
+  const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handlePress = () => {
+    if (!isPlayingRef.current) {
+      // Single tap when not playing → play immediately
+      if (hasEndedRef.current) { player.currentTime = 0; setHasEnded(false); }
+      player.play();
+    } else {
+      // Playing: single tap = toggle controls (after delay), double tap = pause
+      const now = Date.now();
+      const diff = now - lastTapTimeRef.current;
+      lastTapTimeRef.current = now;
+      if (diff < 300) {
+        // Double tap → pause
+        if (singleTapTimerRef.current) {
+          clearTimeout(singleTapTimerRef.current);
+          singleTapTimerRef.current = null;
+        }
+        player.pause();
+      } else {
+        // Single tap — wait to confirm it's not a double tap, then toggle controls
+        if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = setTimeout(() => {
+          singleTapTimerRef.current = null;
+          onTapRef.current();
+        }, 280);
+      }
+    }
+  };
+
+  const handleTapStateChange = (event: { nativeEvent: { state: number } }) => {
+    if (event.nativeEvent.state === State.ACTIVE) {
+      handlePress();
+    }
+  };
+
+  // Cleanup timers on unmount
+  useEffect(() => () => {
+    if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
+    if (postSeekTimerRef.current) clearTimeout(postSeekTimerRef.current);
+  }, []);
+
+  // ── Horizontal swipe to seek ───────────────────────────────────────────────
+  // Uses RNGH PanGestureHandler with:
+  //   activeOffsetX  — only activates after ±10px horizontal movement
+  //   failOffsetY    — immediately fails (yields) if vertical movement > 5px,
+  //                    which lets the navigation's swipe-down-to-dismiss run freely.
+  const dragStartMsRef = useRef(0);
+
+  const handlePanStateChange = (event: { nativeEvent: { state: number; translationX: number } }) => {
+    const { state, translationX } = event.nativeEvent;
+    if (state === State.BEGAN) {
+      // Capture the playback position at the moment the finger touches down
+      dragStartMsRef.current = player.currentTime * 1000;
+    } else if (state === State.END) {
+      const deltaMs = (translationX / width) * 90000;
+      const durMs = player.duration != null && player.duration > 0
+        ? player.duration * 1000 : cachedDurRef.current;
+      player.currentTime = Math.max(0, Math.min(dragStartMsRef.current + deltaMs, durMs)) / 1000;
+      setSeekInfo(null);
+      // Suppress play-button flash while player catches up to the new position
+      setPostSeek(true);
+      if (postSeekTimerRef.current) clearTimeout(postSeekTimerRef.current);
+      postSeekTimerRef.current = setTimeout(() => { setPostSeek(false); postSeekTimerRef.current = null; }, 400);
+    } else if (state === State.FAILED || state === State.CANCELLED) {
+      setSeekInfo(null);
+    }
+  };
+
+  const handlePanGestureEvent = (event: { nativeEvent: { translationX: number } }) => {
+    const { translationX } = event.nativeEvent;
+    const deltaMs = (translationX / width) * 90000;
+    const durMs = player.duration != null && player.duration > 0
+      ? player.duration * 1000 : cachedDurRef.current;
+    const targetMs = Math.max(0, Math.min(dragStartMsRef.current + deltaMs, durMs));
+    setSeekInfo({ delta: deltaMs, targetMs });
+  };
+
   // Pause and reset UI when navigating away; re-emit duration when becoming current
   useEffect(() => {
     if (isCurrent) {
-      // Always emit when becoming current so the seekbar appears immediately.
-      // cachedDurRef is pre-seeded with item.duration from stored metadata.
       onProgressUpdate(player.currentTime * 1000, cachedDurRef.current, player.playing);
     } else {
       player.pause();
       setIsPlaying(false);
       setHasEnded(false);
-      // Do NOT reset videoProgress here — when going backward in the list,
-      // this effect fires AFTER the new current page has already set its duration,
-      // which would wipe out the seekbar. The parent resets progress for non-video items.
     }
   }, [isCurrent]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -263,7 +355,6 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
     const sub = player.addListener('timeUpdate', ({ currentTime }) => {
       if (isCurrentRef.current) {
         const playerDur = (player.duration ?? 0) * 1000;
-        // Fall back to metadata-seeded duration if player hasn't populated it yet
         const durMs = playerDur > 0 ? playerDur : cachedDurRef.current;
         onProgressUpdateRef.current(currentTime * 1000, durMs, player.playing);
       }
@@ -295,43 +386,77 @@ function VideoPage({ item, isCurrent, onProgressUpdate, seekFnRef, playbackRate,
     return () => sub.remove();
   }, [player]);
 
-  const handlePlay = () => {
-    if (hasEnded) { player.currentTime = 0; setHasEnded(false); }
-    player.play();
-  };
+  const seekDeltaSec = seekInfo ? Math.round(seekInfo.delta / 1000) : 0;
 
   return (
-    <View style={styles.page}>
-      <VideoView
-        player={player}
-        style={rotatedImageStyle(item.rotation)}
-        nativeControls={false}
-        contentFit="contain"
-        surfaceType="textureView"
-      />
-      {!isPlaying && (
-        <TouchableOpacity
-          style={[StyleSheet.absoluteFill, styles.playOverlay]}
-          onPress={() => { handlePlay(); onTap(); }}
-          activeOpacity={1}
+    // PanGestureHandler handles horizontal seek natively.
+    // activeOffsetX activates only after ±10px horizontal movement.
+    // failOffsetY yields immediately on ≥5px vertical movement so the
+    // navigation's swipe-down-to-dismiss gesture is never blocked.
+    <PanGestureHandler
+      onGestureEvent={handlePanGestureEvent}
+      onHandlerStateChange={handlePanStateChange}
+      activeOffsetX={[-5, 5]}
+      failOffsetY={[-15, 15]}
+    >
+      <View style={styles.page}>
+        <VideoView
+          player={player}
+          style={rotatedImageStyle(item.rotation)}
+          nativeControls={false}
+          contentFit="contain"
+          surfaceType="textureView"
+        />
+        {/* TapGestureHandler for single/double-tap play-pause.
+            maxDeltaY ensures swipe-down correctly fails the tap. */}
+        <TapGestureHandler
+          numberOfTaps={1}
+          maxDeltaY={5}
+          onHandlerStateChange={handleTapStateChange}
         >
-          <View style={styles.playBtnCircle}>
-            <Text style={[styles.playBtnIcon, hasEnded && { marginLeft: 0, marginTop: Platform.OS === 'android' ? 4 : 0 }]}>{hasEnded ? '↺' : '▶'}</Text>
+          <View style={StyleSheet.absoluteFill}>
+            {!isPlaying && seekInfo === null && !postSeek && (
+              <View style={[StyleSheet.absoluteFill, styles.playOverlay]} pointerEvents="none">
+                <View style={styles.playBtnCircle}>
+                  <Text style={[styles.playBtnIcon, hasEnded && { marginLeft: 0, marginTop: Platform.OS === 'android' ? 4 : 0 }]}>
+                    {hasEnded ? '↺' : '▶'}
+                  </Text>
+                </View>
+                <Text style={styles.playBtnLabel}>{hasEnded ? 'Replay' : 'Play'}</Text>
+              </View>
+            )}
+            {seekInfo !== null && (
+              <View style={[StyleSheet.absoluteFill, vidGesture.overlay]} pointerEvents="none">
+                <View style={vidGesture.badge}>
+                  <Text style={vidGesture.arrow}>{seekDeltaSec >= 0 ? '▶▶' : '◀◀'}</Text>
+                  <Text style={vidGesture.delta}>{seekDeltaSec >= 0 ? '+' : ''}{seekDeltaSec}s</Text>
+                  <Text style={vidGesture.target}>{fmtMs(seekInfo.targetMs)}</Text>
+                </View>
+              </View>
+            )}
           </View>
-          <Text style={styles.playBtnLabel}>{hasEnded ? 'Replay' : 'Play'}</Text>
-        </TouchableOpacity>
-      )}
-      {isPlaying && (
-        <TouchableWithoutFeedback onPress={() => {
-          if (controlsVisible) { player.pause(); }
-          else { onTap(); }
-        }}>
-          <View style={StyleSheet.absoluteFill} />
-        </TouchableWithoutFeedback>
-      )}
-    </View>
+        </TapGestureHandler>
+      </View>
+    </PanGestureHandler>
   );
 }
+
+const vidGesture = StyleSheet.create({
+  overlay: { justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 88 },
+  badge: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  arrow: { color: 'rgba(255,255,255,0.75)', fontSize: 16 },
+  delta: {
+    color: '#fff', fontSize: 20, fontWeight: '400', fontVariant: ['tabular-nums'],
+    textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
+  target: {
+    color: 'rgba(255,255,255,0.6)', fontSize: 12, fontVariant: ['tabular-nums'],
+    textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
+});
 
 // ─── Playback Speed Sheet ──────────────────────────────────────────────────────
 const SPEED_OPTIONS = [
