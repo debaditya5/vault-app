@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { formatBytes } from '../utils/formatBytes';
 import {
+  Animated,
   View,
   FlatList,
   Text,
@@ -56,6 +57,70 @@ export default function HomeScreen() {
     }
     return results;
   }, [searchQuery, folders, mediaByFolder]);
+
+  // ── Search results scrollbar ───────────────────────────────────────────────
+  const searchListRef   = useRef<FlatList>(null);
+  const searchScrollY   = useRef(0);
+  const [sbListH,    setSbListH]    = useState(0);
+  const [sbContentH, setSbContentH] = useState(0);
+  const sbThumbTopAnim  = useRef(new Animated.Value(0)).current;
+  const sbDragStart     = useRef({ thumbTop: 0 });
+  const sbThumbHRef     = useRef(0);
+  const sbTrackHRef     = useRef(0);
+  const sbScrollRef     = useRef(0);
+
+  const SB_MIN_THUMB = 44;
+  const sbThumbH = sbListH > 0 && sbContentH > sbListH
+    ? Math.max(SB_MIN_THUMB, (sbListH / sbContentH) * sbListH) : 0;
+  const sbVisible = sbThumbH > 0;
+
+  useEffect(() => { sbThumbHRef.current = sbThumbH; }, [sbThumbH]);
+  useEffect(() => {
+    sbTrackHRef.current = Math.max(0, sbListH - sbThumbH);
+    sbScrollRef.current = Math.max(0, sbContentH - sbListH);
+  }, [sbListH, sbContentH, sbThumbH]);
+
+  // Reset thumb when search query changes
+  useEffect(() => { sbThumbTopAnim.setValue(0); }, [searchQuery]);
+
+  const updateSearchThumb = useCallback((y: number) => {
+    const track      = sbTrackHRef.current;
+    const scrollable = sbScrollRef.current;
+    if (track <= 0 || scrollable <= 0) return;
+    sbThumbTopAnim.setValue(Math.min(track, Math.max(0, (y / scrollable) * track)));
+  }, [sbThumbTopAnim]);
+
+  const searchSbPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder:  () => true,
+      onPanResponderGrant: (e) => {
+        const track      = sbTrackHRef.current;
+        const scrollable = sbScrollRef.current;
+        const touchY     = e.nativeEvent.locationY;
+        const newTop     = Math.min(track, Math.max(0, touchY - sbThumbHRef.current / 2));
+        sbThumbTopAnim.setValue(newTop);
+        sbDragStart.current.thumbTop = newTop;
+        if (scrollable > 0 && track > 0) {
+          const y = (newTop / track) * scrollable;
+          searchScrollY.current = y;
+          searchListRef.current?.scrollToOffset({ offset: y, animated: false });
+        }
+      },
+      onPanResponderMove: (_, g) => {
+        const track      = sbTrackHRef.current;
+        const scrollable = sbScrollRef.current;
+        if (track <= 0 || scrollable <= 0) return;
+        const newTop = Math.min(track, Math.max(0, sbDragStart.current.thumbTop + g.dy));
+        sbThumbTopAnim.setValue(newTop);
+        const y = (newTop / track) * scrollable;
+        searchScrollY.current = y;
+        searchListRef.current?.scrollToOffset({ offset: y, animated: false });
+      },
+      onPanResponderRelease:   () => {},
+      onPanResponderTerminate: () => {},
+    })
+  ).current;
 
   // ── Modal / sheet state ────────────────────────────────────────────────────
   const [showCreate, setShowCreate] = useState(false);
@@ -329,28 +394,46 @@ export default function HomeScreen() {
 
       {searchQuery.trim() ? (
         /* ── Search results grid ── */
-        <FlatList
-          data={searchResults}
-          keyExtractor={(r) => r.item.id}
-          numColumns={3}
-          contentContainerStyle={searchResults.length === 0 ? styles.searchEmpty : undefined}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>No results for "{searchQuery.trim()}"</Text>
+        <View style={{ flex: 1 }}>
+          <FlatList
+            ref={searchListRef}
+            data={searchResults}
+            keyExtractor={(r) => r.item.id}
+            numColumns={3}
+            contentContainerStyle={searchResults.length === 0 ? styles.searchEmpty : undefined}
+            scrollEventThrottle={16}
+            onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
+              searchScrollY.current = y;
+              updateSearchThumb(y);
+            }}
+            onLayout={(e) => setSbListH(e.nativeEvent.layout.height)}
+            onContentSizeChange={(_, h) => setSbContentH(h)}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>No results for "{searchQuery.trim()}"</Text>
+              </View>
+            }
+            renderItem={({ item: result }) => {
+              const folderItems = mediaByFolder[result.folderId] ?? [];
+              const initialIndex = Math.max(0, folderItems.findIndex((m) => m.id === result.item.id));
+              return (
+                <MediaThumbnail
+                  item={result.item}
+                  onPress={() => navigation.navigate('MediaViewer', { items: folderItems, initialIndex })}
+                  onLongPress={() => {}}
+                />
+              );
+            }}
+          />
+          {sbVisible && (
+            <View style={styles.sbTrack} pointerEvents="auto" {...searchSbPan.panHandlers}>
+              <Animated.View style={{ transform: [{ translateY: sbThumbTopAnim }] }}>
+                <View style={[styles.sbThumb, { height: sbThumbH }]} />
+              </Animated.View>
             </View>
-          }
-          renderItem={({ item: result }) => {
-            const folderItems = mediaByFolder[result.folderId] ?? [];
-            const initialIndex = Math.max(0, folderItems.findIndex((m) => m.id === result.item.id));
-            return (
-              <MediaThumbnail
-                item={result.item}
-                onPress={() => navigation.navigate('MediaViewer', { items: folderItems, initialIndex })}
-                onLongPress={() => {}}
-              />
-            );
-          }}
-        />
+          )}
+        </View>
       ) : (
         /* ── Folder grid ── */
         <View
@@ -668,6 +751,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#333',
     marginVertical: 8,
   },
+  sbTrack: { position: 'absolute', top: 6, right: 0, bottom: 6, width: 20, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2 },
+  sbThumb: { width: 4, borderRadius: 2, backgroundColor: '#ffffff', alignSelf: 'center' },
   fab: {
     position: 'absolute',
     right: 24,

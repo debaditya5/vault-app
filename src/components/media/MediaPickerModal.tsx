@@ -706,7 +706,7 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
             </ScrollView>
           )}
 
-          {!isSearching && sbVisible && (
+          {sbVisible && (
             <View style={styles.sbTrack} pointerEvents="auto" {...sbPan.panHandlers}>
               <Animated.View style={{ transform: [{ translateY: thumbTopAnim }] }}>
                 <View style={[styles.sbThumb, { height: sbThumbH }]} />
