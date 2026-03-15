@@ -13,6 +13,64 @@ class MediaSearchModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("MediaSearch")
 
+    // saveToGallery(localUri, mimeType) → Promise<String>
+    // Uses the correct MediaStore content URI for the MIME type so that videos
+    // are inserted into content://media/external/video (not /images).
+    AsyncFunction("saveToGallery") { localUri: String, mimeType: String, promise: Promise ->
+      val ctx = appContext.reactContext
+      if (ctx == null) {
+        promise.reject("ERR_CTX", "No React context", null)
+        return@AsyncFunction
+      }
+      try {
+        val fileUri = Uri.parse(localUri)
+        val filePath = fileUri.path ?: throw Exception("Cannot resolve path from URI: $localUri")
+        val file = java.io.File(filePath)
+        if (!file.exists()) throw Exception("File not found: $filePath")
+
+        val resolver = ctx.contentResolver
+        val isVideo = mimeType.startsWith("video/")
+
+        val contentUri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          if (isVideo) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+          else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        } else {
+          @Suppress("DEPRECATION")
+          if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+          else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+
+        val values = android.content.ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+          put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.MediaColumns.RELATIVE_PATH, if (isVideo) "Movies" else "Pictures")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+          }
+        }
+
+        val destUri = resolver.insert(contentUri, values)
+          ?: throw Exception("MediaStore.insert returned null")
+
+        java.io.FileInputStream(file).use { inp ->
+          (resolver.openOutputStream(destUri)
+            ?: throw Exception("openOutputStream returned null")).use { out ->
+            inp.copyTo(out)
+          }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          val pending = android.content.ContentValues()
+          pending.put(MediaStore.MediaColumns.IS_PENDING, 0)
+          resolver.update(destUri, pending, null, null)
+        }
+
+        promise.resolve(destUri.toString())
+      } catch (e: Exception) {
+        promise.reject("ERR_SAVE", e.message ?: "Failed to save to gallery", e)
+      }
+    }
+
     // searchAssets(albumId, query, mediaType, limit) → Promise<Array<Asset>>
     AsyncFunction("searchAssets") { albumId: String?, query: String, mediaType: String, limit: Int, promise: Promise ->
       val ctx = appContext.reactContext

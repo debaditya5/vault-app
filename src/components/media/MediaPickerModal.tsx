@@ -69,9 +69,11 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 interface ThumbProps {
   asset:    MediaLibrary.Asset;
   onRemove: () => void;
+  /** Skip the queue and generate immediately — use for the first ~8 visible items. */
+  priority?: boolean;
 }
 
-function PickerThumb({ asset, onRemove }: ThumbProps) {
+function PickerThumb({ asset, onRemove, priority = false }: ThumbProps) {
   const needsGen =
     Platform.OS === 'android' &&
     asset.mediaType === MediaLibrary.MediaType.video;
@@ -86,7 +88,7 @@ function PickerThumb({ asset, onRemove }: ThumbProps) {
     const cached = thumbnailCache.get(asset.id);
     if (cached) { setThumbUri(cached); return; }
     let alive = true;
-    const cancel = enqueueThumb(async () => {
+    const generateThumb = async () => {
       try {
         const r = await withTimeout(
           VideoThumbnails.getThumbnailAsync(asset.uri, { time: 0, quality: 0.5 }),
@@ -108,9 +110,17 @@ function PickerThumb({ asset, onRemove }: ThumbProps) {
           if (alive) onRemove();
         }
       }
-    });
+    };
+    let cancel: () => void;
+    if (priority) {
+      // Bypass queue — run immediately for above-the-fold items.
+      generateThumb();
+      cancel = () => { alive = false; };
+    } else {
+      cancel = enqueueThumb(generateThumb);
+    }
     return () => { alive = false; cancel(); };
-  }, [asset.id, retryKey]);
+  }, [asset.id, retryKey, priority]);
 
   const handleError = useCallback(() => {
     if (needsGen && thumbnailCache.has(asset.id)) {
@@ -190,10 +200,10 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
   const fetchGenRef    = useRef(0);
   const fetchingRef    = useRef(false);
 
-  // ── Search
-  const [searchText,    setSearchText]    = useState('');
-  const [searchResults, setSearchResults] = useState<MediaLibrary.Asset[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  // ── Search — results stored per-album so the accordion can render them
+  const [searchText,           setSearchText]           = useState('');
+  const [searchResultsByAlbum, setSearchResultsByAlbum] = useState<Map<string, MediaLibrary.Asset[]>>(new Map());
+  const [searchLoading,        setSearchLoading]        = useState(false);
   const searchGenRef = useRef(0);
 
   // ── Selection
@@ -327,72 +337,77 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
     }
   }, []);
 
-  // ── Run search
-  // With native module: single OS DB call — instant.
-  // Fallback (no native module): full-album JS scan in batches of 200.
+  // ── Run search — one native query per album, all in parallel.
+  // Results stream into searchResultsByAlbum as each album finishes so the
+  // accordion can start showing matches before all albums are done.
   const runSearch = useCallback(async (
-    albumId: string, query: string, tf: TypeFilter, so: SortOrder,
+    albumList: AlbumHeader[], query: string, tf: TypeFilter, so: SortOrder,
   ) => {
     const gen = ++searchGenRef.current;
-    setSearchResults([]);
+    setSearchResultsByAlbum(new Map());
     setSearchLoading(true);
 
-    try {
-      if (nativeSearchAvailable) {
-        // ── Native path: one round-trip to the OS media DB
-        const raw = await nativeSearchAssets({
-          albumId,
-          query,
-          mediaType: tf,
-          limit: 500,
-        });
-        if (searchGenRef.current !== gen) return;
-        setSearchResults(raw.map(nativeToAsset));
-      } else {
-        // ── JS fallback: page through all assets and filter
-        let cursor: string | undefined = undefined;
-        while (true) {
-          if (searchGenRef.current !== gen) return;
-          const result = await MediaLibrary.getAssetsAsync({
-            album: albumId, first: 200,
-            after: cursor,
-            sortBy: toSortBy(so),
-            mediaType: toMediaTypes(tf),
+    const searchOneAlbum = async (album: AlbumHeader) => {
+      try {
+        let assets: MediaLibrary.Asset[];
+
+        if (nativeSearchAvailable) {
+          const raw = await nativeSearchAssets({
+            albumId:   album.id,
+            query,
+            mediaType: tf,
+            limit:     200,
           });
-          if (searchGenRef.current !== gen) return;
+          assets = raw.map(nativeToAsset);
+        } else {
+          // JS fallback: page through this album and match by filename
+          assets = [];
+          let cursor: string | undefined;
           const q = query.toLowerCase();
-          const matches = result.assets.filter(a =>
-            a.filename.toLowerCase().includes(q)
-          );
-          if (matches.length > 0) {
-            setSearchResults(prev => [...prev, ...matches]);
+          while (true) {
+            if (searchGenRef.current !== gen) return;
+            const result = await MediaLibrary.getAssetsAsync({
+              album: album.id, first: 200, after: cursor,
+              sortBy: toSortBy(so), mediaType: toMediaTypes(tf),
+            });
+            assets.push(...result.assets.filter(a => a.filename.toLowerCase().includes(q)));
+            if (!result.hasNextPage) break;
+            cursor = result.endCursor;
           }
-          if (!result.hasNextPage) break;
-          cursor = result.endCursor;
         }
+
+        if (searchGenRef.current !== gen || assets.length === 0) return;
+        // Stream this album's results in immediately
+        setSearchResultsByAlbum(prev => {
+          const next = new Map(prev);
+          next.set(album.id, assets);
+          return next;
+        });
+      } catch {
+        // skip albums that fail (permission, etc.)
       }
-    } catch {
-      // leave whatever partial results we have
-    } finally {
-      if (searchGenRef.current === gen) setSearchLoading(false);
-    }
+    };
+
+    await Promise.all(albumList.map(searchOneAlbum));
+    if (searchGenRef.current === gen) setSearchLoading(false);
   }, []);
 
-  // ── Trigger search on text change (300 ms debounce)
+  // ── Trigger search on text/filter change (300 ms debounce)
+  // Waits for albums to be loaded before searching.
   useEffect(() => {
-    if (searchText.length === 0 || !expandedId) {
+    if (searchText.length === 0 || albums.length === 0) {
       searchGenRef.current++;
-      setSearchResults([]);
+      setSearchResultsByAlbum(new Map());
       setSearchLoading(false);
       return;
     }
-    const id = expandedId;
-    const q  = searchText;
-    const tf = typeFilter;
-    const so = sortOrder;
-    const t  = setTimeout(() => runSearch(id, q, tf, so), 300);
+    const snap = albums;
+    const q    = searchText;
+    const tf   = typeFilter;
+    const so   = sortOrder;
+    const t    = setTimeout(() => runSearch(snap, q, tf, so), 300);
     return () => clearTimeout(t);
-  }, [searchText, expandedId, typeFilter, sortOrder]);
+  }, [searchText, albums, typeFilter, sortOrder]);
 
   // ── Open / close modal
   useEffect(() => {
@@ -402,7 +417,7 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
       setExpandedAssets([]);
       setExpandedHasMore(false);
       setSearchText('');
-      setSearchResults([]);
+      setSearchResultsByAlbum(new Map());
       setSearchLoading(false);
       thumbTopAnim.setValue(0);
       resetThumbQueue();
@@ -414,26 +429,20 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
     }
   }, [visible]);
 
-  // ── Accordion toggle
+  // ── Accordion toggle (browse mode only — ignored when searching)
   const toggleSection = useCallback((album: AlbumHeader) => {
     if (expandedIdRef.current === album.id) {
       fetchGenRef.current++;
-      searchGenRef.current++;
       fetchingRef.current = false;
       setExpandedId(null);
       setExpandedAssets([]);
       setExpandedHasMore(false);
-      setSearchText('');
-      setSearchResults([]);
-      setSearchLoading(false);
     } else {
       fetchGenRef.current++;
-      searchGenRef.current++;
       fetchingRef.current = false;
       setExpandedId(album.id);
-      setSearchText('');
-      setSearchResults([]);
-      setSearchLoading(false);
+      setExpandedAssets([]);
+      setExpandedHasMore(false);
       fetchAlbumAssets(album.id, typeFilterRef.current, sortOrderRef.current, true);
     }
   }, [fetchAlbumAssets]);
@@ -443,10 +452,12 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
     setTypeFilter(f);
     setShowTypeSheet(false);
     const id = expandedIdRef.current;
-    if (id) {
+    if (id && searchText.length === 0) {
       fetchingRef.current = false;
       fetchAlbumAssets(id, f, sortOrderRef.current, true);
-      if (searchText.length > 0) runSearch(id, searchText, f, sortOrderRef.current);
+    }
+    if (searchText.length > 0 && albums.length > 0) {
+      runSearch(albums, searchText, f, sortOrderRef.current);
     }
   };
 
@@ -454,10 +465,12 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
     setSortOrder(o);
     setShowSortSheet(false);
     const id = expandedIdRef.current;
-    if (id) {
+    if (id && searchText.length === 0) {
       fetchingRef.current = false;
       fetchAlbumAssets(id, typeFilterRef.current, o, true);
-      if (searchText.length > 0) runSearch(id, searchText, typeFilterRef.current, o);
+    }
+    if (searchText.length > 0 && albums.length > 0) {
+      runSearch(albums, searchText, typeFilterRef.current, o);
     }
   };
 
@@ -472,16 +485,22 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
 
   const removeAsset = useCallback((id: string) => {
     setExpandedAssets(prev => prev.filter(a => a.id !== id));
-    setSearchResults(prev => prev.filter(a => a.id !== id));
+    setSearchResultsByAlbum(prev => {
+      const next = new Map(prev);
+      for (const [albumId, assets] of next) {
+        const filtered = assets.filter(a => a.id !== id);
+        filtered.length > 0 ? next.set(albumId, filtered) : next.delete(albumId);
+      }
+      return next;
+    });
     setSelectedMap(prev => { const n = new Map(prev); n.delete(id); return n; });
   }, []);
 
-  // ── What to show
-  const isSearching   = searchText.length > 0;
-  const displayAssets = isSearching ? searchResults : expandedAssets;
+  // ── Derived
+  const isSearching = searchText.length > 0;
 
   // ── List row renderer
-  const renderListRow = (item: MediaLibrary.Asset) => {
+  const renderListRow = (item: MediaLibrary.Asset, priority = false) => {
     const isSelected = selectedMap.has(item.id);
     const isVideo    = item.mediaType === MediaLibrary.MediaType.video;
     return (
@@ -492,7 +511,7 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
         activeOpacity={0.85}
       >
         <View style={styles.listThumbWrap}>
-          <PickerThumb asset={item} onRemove={() => removeAsset(item.id)} />
+          <PickerThumb asset={item} onRemove={() => removeAsset(item.id)} priority={priority} />
           {isVideo && item.duration > 0 && (
             <View style={styles.durBadge}>
               <Text style={styles.durText}>{formatDur(item.duration)}</Text>
@@ -578,27 +597,25 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
             <Text style={[styles.chipArrow, isSorted && styles.chipTextActive]}>▾</Text>
           </TouchableOpacity>
 
-          {expandedId !== null && (
-            <View style={styles.searchWrap}>
-              <Text style={styles.searchIcon}>🔍</Text>
-              <TextInput
-                style={styles.searchInput}
-                value={searchText}
-                onChangeText={setSearchText}
-                placeholder="Search filename…"
-                placeholderTextColor="#555"
-                autoCapitalize="none"
-                autoCorrect={false}
-                clearButtonMode="while-editing"
-              />
-              {searchLoading && (
-                <ActivityIndicator size="small" color="#555" style={{ marginLeft: 4 }} />
-              )}
-            </View>
-          )}
+          <View style={styles.searchWrap}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={styles.searchInput}
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder={expandedId ? 'Search in album…' : 'Search all media…'}
+              placeholderTextColor="#555"
+              autoCapitalize="none"
+              autoCorrect={false}
+              clearButtonMode="while-editing"
+            />
+            {searchLoading && (
+              <ActivityIndicator size="small" color="#555" style={{ marginLeft: 4 }} />
+            )}
+          </View>
         </View>
 
-        {/* ── Accordion */}
+        {/* ── Accordion (browse + search both use this) */}
         <View style={styles.listContainer}>
           {albumsLoading ? (
             <View style={styles.centered}><ActivityIndicator color="#fff" /></View>
@@ -609,18 +626,19 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
               ref={scrollViewRef}
               showsVerticalScrollIndicator={false}
               scrollEventThrottle={16}
+              keyboardShouldPersistTaps="handled"
               onScroll={e => {
                 const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
                 const y = contentOffset.y;
                 listScrollY.current = y;
                 updateThumb(y);
-                const distFromBottom = contentSize.height - layoutMeasurement.height - y;
+                // Infinite scroll — browse mode only
                 if (
-                  distFromBottom < 400 &&
+                  !isSearching &&
+                  contentSize.height - layoutMeasurement.height - y < 400 &&
                   expandedHasMoreRef.current &&
                   !fetchingRef.current &&
-                  expandedIdRef.current &&
-                  !isSearching
+                  expandedIdRef.current
                 ) {
                   fetchAlbumAssets(
                     expandedIdRef.current,
@@ -633,61 +651,62 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
               onLayout={e => setSbListH(e.nativeEvent.layout.height)}
               onContentSizeChange={(_, h) => setSbContentH(h)}
             >
-              {albums.map(album => {
-                const isOpen = expandedId === album.id;
-                return (
-                  <View key={album.id}>
-                    <TouchableOpacity
-                      style={styles.accordionHeader}
-                      onPress={() => toggleSection(album)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.accordionIcon}>📁</Text>
-                      <Text style={styles.accordionTitle} numberOfLines={1}>{album.title}</Text>
-                      <Text style={styles.accordionCount}>{album.count}</Text>
-                      <Text style={styles.accordionChevron}>{isOpen ? '▼' : '▶'}</Text>
-                    </TouchableOpacity>
+              {albums
+                .filter(album => {
+                  if (!isSearching) return true;
+                  // While searching: keep all albums visible so the accordion
+                  // doesn't jump. Once done, hide albums with no matches.
+                  if (searchLoading) return true;
+                  return searchResultsByAlbum.has(album.id);
+                })
+                .map(album => {
+                  const hasMatches  = searchResultsByAlbum.has(album.id);
+                  // Auto-expand as soon as matches arrive; collapse if none yet.
+                  const isOpen      = isSearching ? hasMatches : expandedId === album.id;
+                  const displayList = isSearching
+                    ? (searchResultsByAlbum.get(album.id) ?? [])
+                    : expandedAssets;
+                  const showCount   = isSearching && hasMatches
+                    ? displayList.length
+                    : album.count;
 
-                    {isOpen && (
-                      <View>
-                        {/* Search result summary */}
-                        {isSearching && !searchLoading && (
-                          <View style={styles.searchStatus}>
-                            <Text style={styles.searchStatusText}>
-                              {searchResults.length === 0
-                                ? 'No matches'
-                                : `${searchResults.length} match${searchResults.length !== 1 ? 'es' : ''}`}
-                            </Text>
-                            {!nativeSearchAvailable && (
-                              <Text style={styles.searchStatusSub}>
-                                (JS fallback — run prebuild for instant search)
-                              </Text>
-                            )}
-                          </View>
+                  return (
+                    <View key={album.id}>
+                      <TouchableOpacity
+                        style={styles.accordionHeader}
+                        onPress={() => !isSearching && toggleSection(album)}
+                        activeOpacity={isSearching ? 1 : 0.7}
+                      >
+                        <Text style={styles.accordionIcon}>📁</Text>
+                        <Text style={styles.accordionTitle} numberOfLines={1}>{album.title}</Text>
+                        <Text style={styles.accordionCount}>{showCount}</Text>
+                        {!isSearching && (
+                          <Text style={styles.accordionChevron}>{isOpen ? '▼' : '▶'}</Text>
                         )}
+                      </TouchableOpacity>
 
-                        {displayAssets.length === 0 && !expandedLoading && !searchLoading && (
-                          <View style={styles.sectionEmpty}>
-                            <Text style={styles.emptyText}>
-                              {isSearching ? 'No matches' : 'No media found'}
-                            </Text>
-                          </View>
-                        )}
+                      {isOpen && (
+                        <View>
+                          {displayList.map((asset, idx) => renderListRow(asset, idx < 8))}
+                          {!isSearching && expandedLoading && (
+                            <ActivityIndicator color="#aaa" style={styles.loadingMore} />
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
 
-                        {displayAssets.map(asset => renderListRow(asset))}
-
-                        {!isSearching && expandedLoading && (
-                          <ActivityIndicator color="#aaa" style={styles.loadingMore} />
-                        )}
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+              {/* "No matches" only shown inline after all albums finish with nothing */}
+              {isSearching && !searchLoading && searchResultsByAlbum.size === 0 && (
+                <View style={styles.sectionEmpty}>
+                  <Text style={styles.emptyText}>No matches</Text>
+                </View>
+              )}
             </ScrollView>
           )}
 
-          {sbVisible && (
+          {!isSearching && sbVisible && (
             <View style={styles.sbTrack} pointerEvents="auto" {...sbPan.panHandlers}>
               <Animated.View style={{ transform: [{ translateY: thumbTopAnim }] }}>
                 <View style={[styles.sbThumb, { height: sbThumbH }]} />

@@ -23,7 +23,8 @@ import FolderCard from '../components/folder/FolderCard';
 import CreateFolderModal from '../components/folder/CreateFolderModal';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import FolderActionsSheet from '../components/folder/FolderActionsSheet';
-import { Folder } from '../types';
+import { Folder, MediaItem } from '../types';
+import MediaThumbnail from '../components/media/MediaThumbnail';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { generateId } from '../utils/generateId';
 
@@ -38,6 +39,23 @@ export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const { folders, addFolder, deleteFolder, deleteFolderBatch, renameFolder, removeFolderCoverBatch, mediaByFolder } = useVault();
   const { lock } = useAuth();
+
+  // ── Global search ──────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [] as Array<{ item: MediaItem; folderId: string }>;
+    const results: Array<{ item: MediaItem; folderId: string }> = [];
+    for (const folder of folders) {
+      for (const item of (mediaByFolder[folder.id] ?? [])) {
+        if (item.fileName.toLowerCase().includes(q)) {
+          results.push({ item, folderId: folder.id });
+        }
+      }
+    }
+    return results;
+  }, [searchQuery, folders, mediaByFolder]);
 
   // ── Modal / sheet state ────────────────────────────────────────────────────
   const [showCreate, setShowCreate] = useState(false);
@@ -288,44 +306,90 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {/* FlatList wrapper — measured for PanResponder layout math */}
-      <View
-        ref={listWrapperRef}
-        style={{ flex: 1 }}
-        {...swipePan.panHandlers}
-        onLayout={() => {
-          listWrapperRef.current?.measure((_x, _y, _w, _h, _px, py) => {
-            listTop.current = py;
-          });
-        }}
-      >
-        <FlatList
-          data={folders}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          contentContainerStyle={styles.list}
-          columnWrapperStyle={styles.columnWrapper}
-          scrollEnabled={!isSelecting}
-          onScroll={(e) => { listScrollY.current = e.nativeEvent.contentOffset.y; }}
-          scrollEventThrottle={16}
-          renderItem={({ item }) => (
-            <FolderCard
-              folder={item}
-              onPress={() => handleFolderPress(item)}
-              onLongPress={() => handleFolderLongPress(item)}
-              selected={isSelecting ? selectedFolderIds.has(item.id) : undefined}
-            />
+      {/* Global search bar — always visible, hidden when selecting */}
+      {!isSelecting && (
+        <View style={styles.searchBar}>
+          <Text style={styles.searchBarIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchBarInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search all media…"
+            placeholderTextColor="#555"
+            clearButtonMode="while-editing"
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && Platform.OS === 'android' && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchBarClearBtn}>
+              <Text style={styles.searchBarClearText}>✕</Text>
+            </TouchableOpacity>
           )}
+        </View>
+      )}
+
+      {searchQuery.trim() ? (
+        /* ── Search results grid ── */
+        <FlatList
+          data={searchResults}
+          keyExtractor={(r) => r.item.id}
+          numColumns={3}
+          contentContainerStyle={searchResults.length === 0 ? styles.searchEmpty : undefined}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>🗂️</Text>
-              <Text style={styles.emptyText}>No folders yet</Text>
-              <Text style={styles.emptySubtext}>Tap + to create your first folder</Text>
+              <Text style={styles.emptyText}>No results for "{searchQuery.trim()}"</Text>
             </View>
           }
+          renderItem={({ item: result }) => {
+            const folderItems = mediaByFolder[result.folderId] ?? [];
+            const initialIndex = Math.max(0, folderItems.findIndex((m) => m.id === result.item.id));
+            return (
+              <MediaThumbnail
+                item={result.item}
+                onPress={() => navigation.navigate('MediaViewer', { items: folderItems, initialIndex })}
+                onLongPress={() => {}}
+              />
+            );
+          }}
         />
-
-      </View>
+      ) : (
+        /* ── Folder grid ── */
+        <View
+          ref={listWrapperRef}
+          style={{ flex: 1 }}
+          {...swipePan.panHandlers}
+          onLayout={() => {
+            listWrapperRef.current?.measure((_x, _y, _w, _h, _px, py) => {
+              listTop.current = py;
+            });
+          }}
+        >
+          <FlatList
+            data={folders}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            contentContainerStyle={styles.list}
+            columnWrapperStyle={styles.columnWrapper}
+            scrollEnabled={!isSelecting}
+            onScroll={(e) => { listScrollY.current = e.nativeEvent.contentOffset.y; }}
+            scrollEventThrottle={16}
+            renderItem={({ item }) => (
+              <FolderCard
+                folder={item}
+                onPress={() => handleFolderPress(item)}
+                onLongPress={() => handleFolderLongPress(item)}
+                selected={isSelecting ? selectedFolderIds.has(item.id) : undefined}
+              />
+            )}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>🗂️</Text>
+                <Text style={styles.emptyText}>No folders yet</Text>
+                <Text style={styles.emptySubtext}>Tap + to create your first folder</Text>
+              </View>
+            }
+          />
+        </View>
+      )}
 
       {/* FAB — hidden when selecting */}
       {!isSelecting && (
@@ -523,6 +587,36 @@ const styles = StyleSheet.create({
   },
   lockBtnText: {
     fontSize: 22,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 10,
+    backgroundColor: '#1c1c1e',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  searchBarIcon: {
+    fontSize: 15,
+    marginRight: 6,
+  },
+  searchBarInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    padding: 0,
+  },
+  searchBarClearBtn: {
+    paddingLeft: 8,
+  },
+  searchBarClearText: {
+    color: '#666',
+    fontSize: 15,
+  },
+  searchEmpty: {
+    flex: 1,
   },
   list: {
     padding: 16,

@@ -21,7 +21,10 @@ export interface SearchOptions {
   limit?: number;
 }
 
-let _module: { searchAssets: (albumId: string | null, query: string, mediaType: string, limit: number) => Promise<NativeAsset[]> } | null = null;
+let _module: {
+  searchAssets: (albumId: string | null, query: string, mediaType: string, limit: number) => Promise<NativeAsset[]>;
+  saveToGallery: (localUri: string, mimeType: string) => Promise<string | null>;
+} | null = null;
 
 try {
   _module = requireNativeModule('MediaSearch');
@@ -34,6 +37,20 @@ try {
  * True once `npx expo prebuild` has been run and you're on a dev/prod build.
  */
 export const isAvailable = _module !== null;
+
+/**
+ * Save a local file to the device gallery using the correct MediaStore content
+ * URI for the given MIME type. Fixes the Android bug where expo-media-library's
+ * createAssetAsync routes all files to the images table (even videos).
+ */
+export async function saveToGallery(localUri: string, mimeType: string): Promise<string | null> {
+  if (!_module) {
+    throw new Error(
+      'media-search native module not available. Run `npx expo prebuild` and rebuild the dev client.'
+    );
+  }
+  return _module.saveToGallery(localUri, mimeType);
+}
 
 /**
  * Query the OS media database directly — same path as MX Player.

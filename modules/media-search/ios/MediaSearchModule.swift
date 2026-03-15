@@ -5,6 +5,33 @@ public class MediaSearchModule: Module {
   public func definition() -> ModuleDefinition {
     Name("MediaSearch")
 
+    // saveToGallery(localUri, mimeType) → Promise<Void>
+    AsyncFunction("saveToGallery") {
+      (localUri: String, mimeType: String, promise: Promise) in
+
+      guard let url = URL(string: localUri) else {
+        promise.reject("ERR_URI", "Invalid URI: \(localUri)")
+        return
+      }
+      let isVideo = mimeType.hasPrefix("video/")
+      PHPhotoLibrary.shared().performChanges({
+        let request = PHAssetCreationRequest.forAsset()
+        let options = PHAssetResourceCreationOptions()
+        options.shouldMoveFile = false
+        request.addResource(
+          with: isVideo ? .video : .photo,
+          fileURL: url,
+          options: options
+        )
+      }) { success, error in
+        if success {
+          promise.resolve(nil)
+        } else {
+          promise.reject("ERR_SAVE", error?.localizedDescription ?? "Failed to save to gallery")
+        }
+      }
+    }
+
     // searchAssets(albumId, query, mediaType, limit) → Promise<[Asset]>
     AsyncFunction("searchAssets") {
       (albumId: String?, query: String, mediaType: String, limit: Int, promise: Promise) in

@@ -28,6 +28,7 @@ import { applyVideoRotationForExport } from '../utils/applyExportRotation';
 import MediaPickerModal from '../components/media/MediaPickerModal';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import useMediaImport from '../hooks/useMediaImport';
+import { isAvailable as nativeModuleAvailable, saveToGallery as nativeSaveToGallery } from 'media-search';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Folder'>;
 type Route = RouteProp<RootStackParamList, 'Folder'>;
@@ -213,20 +214,14 @@ export default function FolderScreen() {
         let uriToSave: string;
         if (isRotatedVideo) {
           // Patch the MP4 tkhd matrix so the exported file carries the rotation.
-          // Use a clean extension from mimeType (same reason as the Android branch
-          // below) so Android's MimeTypeMap routes correctly for all rotation angles.
           const ext = mimeToExt(item.mimeType);
           tempUri = `${Paths.cache.uri}${item.fileName || `${item.id}_export.${ext}`}`;
           await applyVideoRotationForExport(item.vaultUri, rotation, tempUri);
           uriToSave = tempUri;
         } else if (Platform.OS === 'android') {
-          // Derive the extension from the stored mimeType so Android's
-          // MimeTypeMap always routes to the correct content provider
-          // (video/* → content://media/external/video, not /images).
-          const ext = mimeToExt(item.mimeType);
-          tempUri = `${Paths.cache.uri}${item.fileName || `${item.id}_export.${ext}`}`;
-          await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
-          uriToSave = tempUri;
+          // Pass the vault URI directly — nativeSaveToGallery reads it via
+          // FileInputStream which works for app-internal file:// paths.
+          uriToSave = item.vaultUri;
         } else {
           // iOS: copy to a temp file with the original filename so the Photos
           // library picks up the correct name instead of the vault's mediaId name.
@@ -235,7 +230,15 @@ export default function FolderScreen() {
           uriToSave = tempUri;
         }
 
-        await MediaLibrary.createAssetAsync(uriToSave);
+        // On Android use our native module which routes to the correct
+        // MediaStore content URI (video/* → /video, image/* → /images).
+        // expo-media-library's createAssetAsync always uses the /images URI
+        // and rejects video/* MIME types on some Android versions.
+        if (Platform.OS === 'android' && nativeModuleAvailable) {
+          await nativeSaveToGallery(uriToSave, item.mimeType);
+        } else {
+          await MediaLibrary.createAssetAsync(uriToSave);
+        }
         toDelete.push(item);
       } catch (e: any) {
         lastError = e?.message ?? String(e);
