@@ -1,6 +1,5 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { FFmpegKit, ReturnCode } from 'ffmpeg-kit-react-native';
 
 /**
  * The resolved vault root is set once during initVaultRoot().
@@ -117,30 +116,4 @@ export async function moveToFolder(
 export async function deleteFolderContents(folderId: string): Promise<void> {
   const dir = getVaultRootUri() + folderId + '/';
   await FileSystem.deleteAsync(dir, { idempotent: true });
-}
-
-/**
- * Remuxes an MXV file to MP4 using FFmpeg stream-copy (fast, lossless when
- * the inner codec is H.264/H.265). Falls back to full re-encode if stream copy
- * fails due to an incompatible codec. Returns the path to the temp MP4 file;
- * the caller is responsible for deleting it after copying to the vault.
- */
-export async function transcodeToMp4(sourceUri: string): Promise<string> {
-  const outPath = FileSystem.cacheDirectory + `transcode_${Date.now()}.mp4`;
-
-  // Try stream copy first — instant, no quality loss
-  let session = await FFmpegKit.execute(`-i "${sourceUri}" -c copy "${outPath}"`);
-  let rc = await session.getReturnCode();
-
-  if (!ReturnCode.isSuccess(rc)) {
-    // Stream copy failed (incompatible codec) — fall back to full re-encode
-    await FileSystem.deleteAsync(outPath, { idempotent: true });
-    session = await FFmpegKit.execute(`-i "${sourceUri}" "${outPath}"`);
-    rc = await session.getReturnCode();
-    if (!ReturnCode.isSuccess(rc)) {
-      throw new Error('FFmpeg transcoding failed for MXV file');
-    }
-  }
-
-  return outPath;
 }

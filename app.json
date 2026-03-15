@@ -60,8 +60,7 @@
           "isAccessMediaLocationEnabled": true
         }
       ],
-      "expo-video",
-      ["@config-plugins/ffmpeg-kit-react-native", { "package": "min" }]
+      "expo-video"
     ],
     "extra": {
       "eas": {
