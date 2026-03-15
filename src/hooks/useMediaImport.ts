@@ -5,7 +5,7 @@ import { File } from 'expo-file-system';
 import { useVault } from '../context/VaultContext';
 import { useAuth } from '../context/AuthContext';
 import { MediaItem } from '../types';
-import { copyToVault } from '../services/fileService';
+import { copyToVault, transcodeToMp4 } from '../services/fileService';
 import { generateId } from '../utils/generateId';
 
 function getExtension(filename: string): string {
@@ -21,6 +21,7 @@ function mimeFromFilename(filename: string, mediaType: string): string {
     png: 'image/png', gif: 'image/gif', webp: 'image/webp',
     heic: 'image/heic', heif: 'image/heif',
     mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/mp4',
+    mxv: 'video/mp4', // stored as MP4 after transcoding
   };
   return map[ext] ?? (mediaType === 'video' ? 'video/mp4' : 'image/jpeg');
 }
@@ -87,6 +88,7 @@ export default function useMediaImport(folderId: string) {
 
         let vaultUri: string;
         let fileSizeBytes = 0;
+        let resolvedExt = ext;
 
         if (isFalseMode) {
           vaultUri = asset.uri;
@@ -100,13 +102,34 @@ export default function useMediaImport(folderId: string) {
             // fall back to original uri
           }
 
-          const storedFilename = `${mediaId}.${ext}`;
+          // MXV is not natively playable — remux to MP4 before storing
+          let tempMxvTranscode: string | null = null;
+          if (ext === 'mxv') {
+            try {
+              fileUri = await transcodeToMp4(fileUri);
+              tempMxvTranscode = fileUri;
+              resolvedExt = 'mp4';
+            } catch (err) {
+              console.error('MXV transcoding failed:', err);
+              copyErrors++;
+              continue;
+            }
+          }
+
+          const storedFilename = `${mediaId}.${resolvedExt}`;
           try {
             vaultUri = await copyToVault(fileUri, folderId, storedFilename);
           } catch (err) {
             console.error('Failed to copy asset to vault:', err);
             copyErrors++;
             continue;
+          } finally {
+            // Clean up the temp transcoded file regardless of copy success/failure
+            if (tempMxvTranscode) {
+              import('expo-file-system/legacy').then(({ deleteAsync }) =>
+                deleteAsync(tempMxvTranscode!, { idempotent: true }).catch(() => {})
+              );
+            }
           }
           try {
             fileSizeBytes = new File(vaultUri).size ?? 0;
@@ -121,7 +144,7 @@ export default function useMediaImport(folderId: string) {
         batch.push({
           id: mediaId,
           folderId,
-          fileName: asset.filename || `${mediaId}.${ext}`,
+          fileName: asset.filename || `${mediaId}.${resolvedExt}`,
           vaultUri,
           mediaType: asset.mediaType === 'video' ? 'video' : 'photo',
           mimeType,
