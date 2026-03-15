@@ -6,6 +6,11 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "androidStatusBar": {
+      "translucent": false,
+      "backgroundColor": "#000000",
+      "barStyle": "light-content"
+    },
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -21,11 +26,6 @@
     },
     "android": {
       "package": "com.dk.timematrix",
-      "statusBar": {
-        "translucent": false,
-        "backgroundColor": "#000000",
-        "barStyle": "light-content"
-      },
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
