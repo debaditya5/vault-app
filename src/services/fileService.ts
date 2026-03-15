@@ -117,3 +117,18 @@ export async function deleteFolderContents(folderId: string): Promise<void> {
   const dir = getVaultRootUri() + folderId + '/';
   await FileSystem.deleteAsync(dir, { idempotent: true });
 }
+
+/** Derives the permanent on-disk thumbnail path for a vault video file. */
+export function thumbUriFor(vaultUri: string): string {
+  return vaultUri.replace(/\.[^.]+$/, '_thumb.jpg');
+}
+
+/**
+ * Copies a generated thumbnail (temp URI from expo-video-thumbnails)
+ * to its permanent location next to the vault file.
+ */
+export async function saveThumbnail(tempUri: string, vaultUri: string): Promise<string> {
+  const dest = thumbUriFor(vaultUri);
+  await FileSystem.copyAsync({ from: tempUri, to: dest });
+  return dest;
+}

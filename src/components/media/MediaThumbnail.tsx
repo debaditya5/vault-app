@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Image, TouchableOpacity, Text, StyleSheet, Dimensions } from 'react-native';
 import * as VideoThumbnails from 'expo-video-thumbnails';
+import * as FileSystem from 'expo-file-system/legacy';
 import { MediaItem } from '../../types';
 import { formatDuration } from '../../utils/formatBytes';
+import { thumbUriFor, saveThumbnail } from '../../services/fileService';
 
 const THUMB_SIZE = (Dimensions.get('window').width - 4) / 3;
 
@@ -24,13 +26,29 @@ export default function MediaThumbnail({ item, onPress, onLongPress }: MediaThum
   useEffect(() => {
     if (item.mediaType !== 'video' || thumbUri) return;
     let active = true;
-    VideoThumbnails.getThumbnailAsync(item.vaultUri, { time: 500 })
-      .then(({ uri }) => {
+
+    (async () => {
+      // Fast path: check for a previously saved thumbnail on disk
+      const diskThumb = thumbUriFor(item.vaultUri);
+      const info = await FileSystem.getInfoAsync(diskThumb);
+      if (info.exists) {
+        if (active) {
+          thumbCache.set(item.id, diskThumb);
+          setThumbUri(diskThumb);
+        }
+        return;
+      }
+
+      // Slow path: generate for the first time, then persist to disk
+      try {
+        const { uri } = await VideoThumbnails.getThumbnailAsync(item.vaultUri, { time: 500 });
         if (!active) return;
-        thumbCache.set(item.id, uri);
-        setThumbUri(uri);
-      })
-      .catch(() => {});
+        const saved = await saveThumbnail(uri, item.vaultUri).catch(() => uri);
+        thumbCache.set(item.id, saved);
+        setThumbUri(saved);
+      } catch {}
+    })();
+
     return () => { active = false; };
   }, [item.id, item.vaultUri, item.mediaType, thumbUri]);
 

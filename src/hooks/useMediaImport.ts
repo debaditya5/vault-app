@@ -5,7 +5,8 @@ import { File } from 'expo-file-system';
 import { useVault } from '../context/VaultContext';
 import { useAuth } from '../context/AuthContext';
 import { MediaItem } from '../types';
-import { copyToVault } from '../services/fileService';
+import { copyToVault, saveThumbnail } from '../services/fileService';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import { generateId } from '../utils/generateId';
 
 function getExtension(filename: string): string {
@@ -118,6 +119,13 @@ export default function useMediaImport(folderId: string) {
             fileSizeBytes = new File(vaultUri).size ?? 0;
           } catch {
             // non-critical
+          }
+
+          // Pre-generate thumbnail for videos so it's ready before first render
+          if (asset.mediaType === 'video') {
+            VideoThumbnails.getThumbnailAsync(vaultUri, { time: 500 })
+              .then(({ uri }) => saveThumbnail(uri, vaultUri))
+              .catch(() => {}); // fire-and-forget, non-critical
           }
 
           // Track for batch deletion — only assets successfully copied to vault
