@@ -2,23 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Image, TouchableOpacity, Text, StyleSheet, Dimensions } from 'react-native';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { MediaItem } from '../../types';
+import { formatDuration } from '../../utils/formatBytes';
 
 const THUMB_SIZE = (Dimensions.get('window').width - 4) / 3;
 
-function formatDuration(seconds: number): string {
-  const totalSecs = Math.floor(seconds);
-  if (totalSecs < 60) {
-    return `${totalSecs}s`;
-  }
-  if (totalSecs < 3600) {
-    const m = Math.floor(totalSecs / 60);
-    const s = totalSecs % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  return `${h}h ${m}m`;
-}
 
 // In-memory thumbnail cache: mediaItem.id → thumbnail URI
 const thumbCache = new Map<string, string>();
@@ -52,6 +39,7 @@ export default function MediaThumbnail({ item, onPress, onLongPress }: MediaThum
       style={styles.container}
       onPress={onPress}
       onLongPress={onLongPress}
+      delayLongPress={700}
       activeOpacity={0.8}
     >
       {thumbUri ? (

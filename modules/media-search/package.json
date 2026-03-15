@@ -1,0 +1,6 @@
+{
+  "name": "media-search",
+  "version": "1.0.0",
+  "description": "Native MediaStore/PHPhotos filename search for Vault",
+  "main": "./index"
+}

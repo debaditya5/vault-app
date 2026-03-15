@@ -55,6 +55,20 @@ function findBox(b: Uint8Array, start: number, end: number, type: string): numbe
   return -1;
 }
 
+/**
+ * Maps a tkhd matrix back to the rotation angle it represents (0 / 90 / 180 / 270).
+ * Reads the first two values (a, b) of the matrix stored at `offset` inside `bytes`.
+ */
+function matrixToRotation(bytes: Uint8Array, offset: number): number {
+  const a = r32(bytes, offset);         // matrix[0,0] in 16.16 fixed-point
+  const b = r32(bytes, offset + 4);     // matrix[0,1] in 16.16 fixed-point
+  if (a === 0x00010000 && b === 0x00000000) return 0;
+  if (a === 0x00000000 && b === 0x00010000) return 90;
+  if (a === 0xFFFF0000 && b === 0x00000000) return 180;
+  if (a === 0x00000000 && b === 0xFFFF0000) return 270;
+  return 0; // unrecognised — treat as identity
+}
+
 /** Returns the tkhd matrix offset within the supplied byte chunk, or -1. */
 function matrixOffsetInChunk(bytes: Uint8Array): number {
   const moov = findBox(bytes, 0, bytes.length, 'moov');
@@ -129,17 +143,39 @@ export async function applyVideoRotationForExport(
     return;
   }
 
-  // Find the 3-byte-aligned window around the 36-byte matrix.
-  // Working in base64 string space means we only decode ~38 bytes total.
+  // Find the 3-byte-aligned window. We need the 36-byte matrix AND the following 8 bytes
+  // (width and height), so we target 44 bytes from the matrix offset.
   const alignedStart = Math.floor(matrixOffset / 3) * 3;
-  const alignedEnd   = Math.ceil((matrixOffset + 36) / 3) * 3;
+  const alignedEnd   = Math.ceil((matrixOffset + 44) / 3) * 3;
   const b64Start = (alignedStart / 3) * 4;
   const b64End   = (alignedEnd   / 3) * 4;
 
-  // Decode only the small window, patch, re-encode.
+  // Decode only the small window around the matrix.
   const window = b64ToBytes(fullB64.slice(b64Start, b64End));
   const offsetInWindow = matrixOffset - alignedStart;
-  const matrix = TKHD_MATRICES[rotation] ?? TKHD_MATRICES[0];
+
+  // Read the file's existing tkhd rotation and COMPOSE it with the user's
+  // requested rotation rather than replacing it outright.
+  // This ensures that a portrait-recorded video (native tkhd = 90°) plus a
+  // user rotation of 90° produces a final tkhd of 180°, not 90°.
+  const existingRotation = matrixToRotation(window, offsetInWindow);
+  const totalRotation = (existingRotation + rotation) % 360;
+
+  // Also read the track width and height from immediately after the matrix
+  // so we can properly translate the video back into the visible coordinate space.
+  const trackWidth = r32(window, offsetInWindow + 36);
+  const trackHeight = r32(window, offsetInWindow + 40);
+
+  const matrix = [...(TKHD_MATRICES[totalRotation] ?? TKHD_MATRICES[0])];
+  if (totalRotation === 90) {
+    matrix[6] = trackHeight;
+  } else if (totalRotation === 180) {
+    matrix[6] = trackWidth;
+    matrix[7] = trackHeight;
+  } else if (totalRotation === 270) {
+    matrix[7] = trackWidth;
+  }
+
   for (let i = 0; i < 9; i++) w32(window, offsetInWindow + i * 4, matrix[i]);
 
   // Splice patched window back — native string concat, no full-file JS loop.

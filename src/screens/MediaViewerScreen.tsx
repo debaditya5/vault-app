@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { formatBytes } from '../utils/formatBytes';
 import {
   View,
   Image,
@@ -33,13 +34,6 @@ type Route = RouteProp<RootStackParamList, 'MediaViewer'>;
 
 const { width, height } = Dimensions.get('window');
 
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {

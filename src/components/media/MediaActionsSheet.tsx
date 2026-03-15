@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatBytes } from '../../utils/formatBytes';
 import {
   Modal,
   View,
@@ -14,13 +15,6 @@ import {
 import { MediaItem } from '../../types';
 import { useVault } from '../../context/VaultContext';
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function formatDate(iso: string): string {
   const d = new Date(iso);

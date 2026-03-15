@@ -5,76 +5,90 @@ A private, PIN-locked photo and video vault built with React Native and Expo. St
 ## Features
 
 - **PIN protection** — 6-digit PIN stored in iOS Keychain / Android Keystore via `expo-secure-store`. Auto-locks when the app backgrounds.
-- **Decoy mode (false vault)** — A separate "false password" opens an empty ephemeral vault, hiding the real contents. The app opens as a "World Time" clock; long-pressing the title reveals the PIN screen.
+- **Decoy mode (false vault)** — A separate "false password" opens an empty ephemeral vault, hiding the real contents. The app presents as a "World Time" clock; long-pressing the title reveals the PIN screen.
 - **Folders** — Create, rename, delete, and set cover photos for your media folders.
 - **Import media** — Pick photos and videos from your gallery; files are copied into the app's private directory and removed from the picker view.
-- **Media viewer** — Full-screen photo/video viewer. Swipe horizontally to navigate items; swipe down to close. Tap to show/hide controls (auto-hides after 3s during playback).
-- **Video playback** — Native player with play/pause (tap), scrub-to-seek (drag left/right on the video), draggable seek bar with time display, auto-hiding controls, and playback speed selection (0.25× – 8× via the menu).
-- **Video thumbnails** — Auto-generated thumbnails with duration badge in the folder grid.
-- **Rotation** — Rotate photos and videos 90° at a time without cropping.
-- **Slideshow** — Auto-advance slideshow with configurable slide duration (2s / 3s / 4s / 5s / 10s).
-- **Sort & Filter** — Sort by date or name; filter by media type (photos/videos) or search by name.
-- **Swipe-to-select** — Long-press to enter selection mode, then drag to bulk-select items for delete/move.
-- **Unhide** — Save any vaulted item back to your device gallery.
-- **Move** — Move media items between folders.
-- **Share** — Share any photo or video directly from the viewer.
-- **Storage stats** — See folder count, total items, and space used in Settings.
+- **Native filename search** — Queries the OS media database (Android `MediaStore` / iOS `PHFetchOptions`) directly for instant search across thousands of files — same approach used by MX Player.
+- **Media viewer** — Full-screen photo/video viewer. Swipe horizontally to navigate; swipe down to close. Tap to show/hide controls (auto-hides after 3s during playback).
+- **Video playback** — Native player with play/pause, scrub-to-seek, draggable seek bar, auto-hiding controls, and speed selection (0.25× – 8×).
+- **Video thumbnails** — Auto-generated thumbnails with duration badge, concurrent generation (max 4 simultaneous), session-level cache.
+- **Rotation** — Rotate photos and videos 90° at a time without cropping. MP4 rotation is applied by patching the `tkhd` matrix directly.
+- **Slideshow** — Auto-advance slideshow with configurable interval (2s / 3s / 4s / 5s / 10s).
+- **Sort & Filter** — Sort by date or name; filter by media type (photos/videos).
+- **Swipe-to-select** — Long-press to enter selection mode, then drag to bulk-select for delete/move.
+- **Unhide** — Export any vaulted item back to your device gallery.
+- **Move** — Move media between folders.
+- **Storage stats** — Folder count, total items, and space used shown in Settings.
 
 ## Tech Stack
 
 | Library | Purpose |
 |---|---|
 | Expo SDK 54 | Managed workflow, build tooling |
-| React Navigation (Stack + Tabs) | Navigation |
+| React Native 0.81.5 | Framework |
+| React Navigation v7 (Stack + Tabs) | Navigation |
 | `expo-secure-store` | PIN storage (Keychain/Keystore) |
 | `expo-file-system` | Copy/move/delete files in sandboxed storage |
 | `expo-image-picker` | Media selection from gallery |
-| `expo-video` | Video playback (migrated from deprecated expo-av) |
+| `expo-video` | Video playback |
 | `expo-video-thumbnails` | Video thumbnail generation |
 | `expo-media-library` | Save media back to device gallery |
 | `@react-native-async-storage/async-storage` | Folder & media metadata persistence |
+| `modules/media-search` | Local native module — direct `MediaStore`/`PHFetchOptions` search |
 
 ## Project Structure
 
 ```
 vault-app/
-├── App.tsx                        # Root: providers + AppState lock listener
+├── App.tsx                        # Root: provider chain + AppState lock listener
 ├── app.json                       # Expo config, permissions, plugins
+├── eas.json                       # EAS Build profiles (development / preview / production)
+├── index.ts                       # React Native entry point
+├── modules/
+│   └── media-search/              # Native filename search module
+│       ├── index.ts               # JS entry — exports searchAssets()
+│       ├── expo-module.config.json
+│       ├── android/               # Kotlin — queries MediaStore with LIKE filter
+│       └── ios/                   # Swift — queries PHFetchOptions with NSPredicate
 ├── src/
 │   ├── navigation/
 │   │   ├── RootNavigator.tsx      # Stack navigator (Splash → Lock → Home → Folder → Viewer)
 │   │   └── MainTabs.tsx           # Bottom tabs (Home + Settings)
 │   ├── context/
-│   │   ├── AuthContext.tsx        # Authentication state, lock/unlock, false mode, suppress-lock
-│   │   ├── VaultContext.tsx       # Folders & media CRUD, move, rotate, cover; dual real/false vault state
+│   │   ├── AuthContext.tsx        # Auth state, lock/unlock, false mode, suppress-lock
+│   │   ├── VaultContext.tsx       # Folders & media CRUD; dual real/false vault state
 │   │   └── SettingsContext.tsx    # Persisted settings (slideshow interval, long-press delay, false password)
 │   ├── screens/
 │   │   ├── SplashScreen.tsx       # Decoy "World Time" clock; long-press title → PIN screen
-│   │   ├── LockScreen.tsx         # PIN entry with lockout timer (5 attempts → 30s)
+│   │   ├── LockScreen.tsx         # PIN entry with lockout (5 attempts → 30s)
 │   │   ├── SetupPinScreen.tsx     # First-run PIN creation + confirmation
-│   │   ├── ChangePinScreen.tsx    # Change existing PIN (3-step: verify → new → confirm)
+│   │   ├── ChangePinScreen.tsx    # Change PIN (3-step: verify → new → confirm)
 │   │   ├── HomeScreen.tsx         # Folder grid with swipe-to-select + bulk ops
-│   │   ├── FolderScreen.tsx       # Media grid with sort/filter + swipe-to-select
-│   │   ├── MediaViewerScreen.tsx  # Full-screen photo/video viewer; swipe-to-seek, speed control, auto-hide controls, slideshow
-│   │   └── SettingsScreen.tsx     # Security, slideshow, long-press delay, storage stats
+│   │   ├── FolderScreen.tsx       # Media list with sort/filter + swipe-to-select
+│   │   ├── MediaViewerScreen.tsx  # Full-screen viewer; seek, speed control, slideshow
+│   │   └── SettingsScreen.tsx     # Security, playback, decoy, storage stats
 │   ├── components/
 │   │   ├── pin/PinPad.tsx         # 3×4 digit grid
 │   │   ├── pin/PinDots.tsx        # PIN dot indicator with shake animation
 │   │   ├── folder/FolderCard.tsx  # Folder thumbnail card
 │   │   ├── folder/CreateFolderModal.tsx
 │   │   ├── folder/FolderActionsSheet.tsx
-│   │   ├── media/MediaThumbnail.tsx     # Thumbnail with video overlay + duration badge
+│   │   ├── media/MediaThumbnail.tsx      # Thumbnail with video overlay + duration badge
 │   │   ├── media/MediaActionsSheet.tsx
-│   │   ├── media/MediaPickerModal.tsx   # Native gallery picker UI
-│   │   └── common/OnboardingModal.tsx   # First-run onboarding shown in SplashScreen
+│   │   ├── media/MediaPickerModal.tsx    # Album browser + native search + lazy thumbnails
+│   │   ├── common/OnboardingModal.tsx    # First-run onboarding
+│   │   └── common/ConfirmDialog.tsx      # Reusable confirmation dialog
 │   ├── services/
 │   │   ├── pinService.ts          # SecureStore: save, verify, check PIN
-│   │   ├── fileService.ts         # FileSystem: copy, move, delete vault files; Android external storage fallback
-│   │   └── metadataService.ts     # AsyncStorage: load/save folders & media
+│   │   ├── fileService.ts         # FileSystem: copy, move, delete; Android external storage fallback
+│   │   └── metadataService.ts     # AsyncStorage: load/save folders & media metadata
 │   ├── hooks/
-│   │   └── useMediaImport.ts      # Orchestrates picker → URI resolution → copy → context update
-│   ├── types/index.ts
-│   └── utils/generateId.ts
+│   │   └── useMediaImport.ts      # Orchestrates picker → URI resolve → copy → context update
+│   ├── types/index.ts             # Folder, MediaItem, VaultState interfaces
+│   └── utils/
+│       ├── formatBytes.ts         # Shared formatBytes() and formatDuration() utilities
+│       ├── generateId.ts          # Timestamp-based unique ID generator
+│       └── applyExportRotation.ts # Patches MP4 tkhd matrix for video rotation on export
 ```
 
 ## Getting Started
@@ -83,8 +97,8 @@ vault-app/
 
 - Node.js 22+
 - [Expo CLI](https://docs.expo.dev/get-started/installation/)
-- EAS CLI (`npm install -g eas-cli`) — for production builds
-- Physical device recommended (simulator has no real media library)
+- EAS CLI — `npm install -g eas-cli` (for builds)
+- Physical Android device recommended (simulators have no real media library)
 
 ### Install
 
@@ -94,24 +108,15 @@ cd vault-app
 npm install
 ```
 
-### Run
-
-> **Expo Go will not work.** This app uses native plugins (`expo-secure-store`, `expo-video`, `expo-media-library`, `expo-image-picker`) that require a **development build**. The dev server emits an `exp+vault-app://` scheme QR code that Expo Go cannot open.
-
-**Step 1 — Build and install the dev client** (one-time per device/simulator):
-
-```bash
-npx expo run:ios       # iOS simulator or connected iPhone
-npx expo run:android   # Android emulator or connected device
-```
-
-**Step 2 — Start the dev server** (subsequent runs):
+### Dev server (JS-only changes)
 
 ```bash
 npx expo start
 ```
 
-Scan the QR code with the **Vault dev client** that was installed in Step 1 (not Expo Go).
+Scan the QR code with the **Vault dev client** app installed on your device (not Expo Go — native plugins are required).
+
+> **Note:** The native search module (`modules/media-search`) only activates in a build that includes the compiled native code. On the current dev client it falls back to a JS-based scan automatically.
 
 ## CI/CD — Tag-based Builds
 
@@ -123,27 +128,28 @@ Builds are **not triggered on every commit**. The pipeline runs only when:
 ### Releasing a new build
 
 ```bash
-# Commit and push your changes normally — no build is triggered
+# Commit and push your changes — no build triggered
 git add .
 git commit -m "feat: my new feature"
 git push
 
-# When ready to distribute, create and push a version tag
+# When ready to distribute, tag and push
 git tag v1.2.0
-git push origin v1.2.0   # ← this triggers the build
+git push origin v1.2.0   # ← triggers EAS build + Firebase distribution
 ```
 
-### Pipeline steps
+### Pipeline
 
 1. Checkout + `npm ci`
-2. EAS local build → `TimeMatrix.apk` (Android `preview` profile by default)
-3. Upload to **Firebase App Distribution** with release notes showing the tag + commit SHA
+2. `npx expo prebuild` — generates native Android/iOS projects (including the `media-search` module)
+3. EAS local build → `TimeMatrix.apk` (Android `preview` profile by default)
+4. Upload to **Firebase App Distribution**
 
 ### Required GitHub Secrets
 
 | Secret | Description |
 |---|---|
-| `EXPO_TOKEN` | Expo account token (account settings on expo.dev) |
+| `EXPO_TOKEN` | Expo account token (expo.dev account settings) |
 | `FIREBASE_APP_ID` | Firebase app ID from the Firebase console |
 | `FIREBASE_TOKEN` | Firebase CI token (`firebase login:ci`) |
 
@@ -151,14 +157,14 @@ git push origin v1.2.0   # ← this triggers the build
 
 | Profile | Output | Use case |
 |---|---|---|
-| `development` | Internal distribution (dev client) | Local dev with Expo Dev Client |
+| `development` | Dev client APK | Install once; use with `expo start` for dev |
 | `preview` | APK, internal distribution | Testers via Firebase App Distribution |
 | `production` | AAB, auto-increment version | Play Store submission |
 
 ## Security Notes
 
-- The PIN is never stored in AsyncStorage — only in the OS secure enclave (`expo-secure-store`).
-- All media files are stored in the app's sandboxed directory (inaccessible to other apps). On Android, the app first tries external app-specific storage (`/Android/data/{pkg}/files/vault/`) for Files app visibility, falling back to internal `documentDirectory`.
+- The PIN is never stored in AsyncStorage — only in the OS secure enclave via `expo-secure-store`.
+- All media is stored in the app's sandboxed directory (inaccessible to other apps). On Android, the app tries external app-specific storage (`/Android/data/{pkg}/files/vault/`) first for Files app visibility, falling back to internal `documentDirectory`.
 - A `.nomedia` file is placed in the vault root to prevent the system gallery scanner from indexing vault contents.
-- The vault auto-locks whenever the app moves to the background.
-- The false password opens an ephemeral decoy vault with no real data — contents are never persisted and reset each session.
+- The app auto-locks whenever it moves to the background.
+- The false password opens an ephemeral decoy vault — its contents are never persisted and reset each session.

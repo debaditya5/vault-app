@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { formatBytes } from '../utils/formatBytes';
 import {
   View,
   Text,
@@ -21,13 +22,6 @@ import { TabParamList } from '../navigation/MainTabs';
 type Nav = StackNavigationProp<RootStackParamList>;
 type TabNav = BottomTabNavigationProp<TabParamList>;
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 const SLIDESHOW_OPTIONS = [
   { label: '2s', ms: 2000 },

@@ -1,34 +1,18 @@
 # Dependencies
 node_modules/
 
-# Expo
+# Expo generated
 .expo/
 dist/
-web-build/
 expo-env.d.ts
-
-# Native builds
-android/
-ios/
 
 # Environment
 .env
-.env.local
 .env*.local
 
 # macOS
 .DS_Store
 **/.DS_Store
 
-# Editor
-.vscode/
-.idea/
-
 # Logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Typescript
-*.tsbuildinfo

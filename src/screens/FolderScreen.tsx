@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { formatBytes } from '../utils/formatBytes';
 import {
   View,
   FlatList,
@@ -212,15 +213,26 @@ export default function FolderScreen() {
         let uriToSave: string;
         if (isRotatedVideo) {
           // Patch the MP4 tkhd matrix so the exported file carries the rotation.
-          tempUri = Paths.cache.uri + item.id + '_export_' + item.fileName;
+          // Use a clean extension from mimeType (same reason as the Android branch
+          // below) so Android's MimeTypeMap routes correctly for all rotation angles.
+          const ext = mimeToExt(item.mimeType);
+          tempUri = `${Paths.cache.uri}${item.fileName || `${item.id}_export.${ext}`}`;
           await applyVideoRotationForExport(item.vaultUri, rotation, tempUri);
           uriToSave = tempUri;
         } else if (Platform.OS === 'android') {
-          tempUri = Paths.cache.uri + item.id + '_' + item.fileName;
+          // Derive the extension from the stored mimeType so Android's
+          // MimeTypeMap always routes to the correct content provider
+          // (video/* → content://media/external/video, not /images).
+          const ext = mimeToExt(item.mimeType);
+          tempUri = `${Paths.cache.uri}${item.fileName || `${item.id}_export.${ext}`}`;
           await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
           uriToSave = tempUri;
         } else {
-          uriToSave = item.vaultUri;
+          // iOS: copy to a temp file with the original filename so the Photos
+          // library picks up the correct name instead of the vault's mediaId name.
+          tempUri = `${Paths.cache.uri}${item.fileName || item.vaultUri.split('/').pop()}`;
+          await FileSystem.copyAsync({ from: item.vaultUri, to: tempUri });
+          uriToSave = tempUri;
         }
 
         await MediaLibrary.createAssetAsync(uriToSave);
@@ -261,9 +273,16 @@ export default function FolderScreen() {
       <View style={styles.header}>
         {isSelecting ? (
           <>
-            <TouchableOpacity onPress={exitSelectMode} style={styles.headerLeft}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
+            <View style={styles.headerSelectLeft}>
+              <TouchableOpacity onPress={exitSelectMode}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              {selectedIds.size > 0 && (
+                <TouchableOpacity onPress={() => setSelectedIds(new Set())}>
+                  <Text style={styles.unselectAllText}>Unselect All</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <Text style={styles.headerTitle}>{selectedIds.size} selected</Text>
             <View style={styles.headerRight}>
               <TouchableOpacity style={styles.menuIconBtn} onPress={handleMenuBtnPress}>
@@ -568,9 +587,11 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12 },
   headerLeft: { width: 72 },
+  headerSelectLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerRight: { width: 72, flexDirection: 'row', justifyContent: 'flex-end', gap: 4 },
   backText: { color: '#0a84ff', fontSize: 17 },
   cancelText: { color: '#0a84ff', fontSize: 17 },
+  unselectAllText: { color: '#0a84ff', fontSize: 14 },
   menuIconBtn: {
     width: 34,
     height: 34,
@@ -648,13 +669,23 @@ const thumbStyles = StyleSheet.create({
 });
 
 // ─── Bulk action helpers ─────────────────────────────────────────────────────────
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+
+/** Maps a stored MIME type to a file extension that Android can reliably detect. */
+function mimeToExt(mime: string): string {
+  const map: Record<string, string> = {
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/x-m4v': 'm4v',
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+  };
+  return map[mime] ?? (mime.startsWith('video/') ? 'mp4' : 'jpg');
 }
+
 
 const bs = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
