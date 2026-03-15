@@ -3,11 +3,11 @@ apply plugin: 'kotlin-android'
 
 android {
   namespace "expo.modules.mediasearch"
-  compileSdkVersion safeExtGet("compileSdkVersion", 35)
+  compileSdk safeExtGet("compileSdkVersion", 35)
 
   defaultConfig {
-    minSdkVersion safeExtGet("minSdkVersion", 24)
-    targetSdkVersion safeExtGet("targetSdkVersion", 35)
+    minSdk safeExtGet("minSdkVersion", 24)
+    targetSdk safeExtGet("targetSdkVersion", 35)
     versionCode 1
     versionName "1.0"
   }
