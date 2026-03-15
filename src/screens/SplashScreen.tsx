@@ -194,8 +194,14 @@ export default function SplashScreen() {
       c.city.toLowerCase().includes(search.toLowerCase())
   );
 
+  const bg = '#505050';
+  const rowBg = '#505050';
+  const rowBorder = '#5e5e5e';
+  const metaColor = '#b0b0b0';
+  const timeColor = '#d0d0d0';
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: bg }]}>
       <OnboardingModal onDone={() => {}} />
 
       {/* ── Header ── */}
@@ -226,21 +232,21 @@ export default function SplashScreen() {
           <Swipeable
             renderRightActions={() => (
               <TouchableOpacity
-                style={styles.deleteAction}
+                style={[styles.deleteAction, { borderBottomColor: rowBorder }]}
                 onPress={() => removeCity(item.zone)}
               >
                 <Text style={styles.deleteText}>Remove</Text>
               </TouchableOpacity>
             )}
           >
-            <View style={styles.zoneRow}>
+            <View style={[styles.zoneRow, { backgroundColor: rowBg, borderBottomColor: rowBorder }]}>
               <View style={styles.zoneLeft}>
                 <Text style={styles.cityName}>{item.city}</Text>
-                <Text style={styles.cityMeta}>
+                <Text style={[styles.cityMeta, { color: metaColor }]}>
                   {getGMTOffset(item.zone, now)} · {formatDate(item.zone, now)}
                 </Text>
               </View>
-              <Text style={styles.cityTime}>{formatTime(item.zone, now)}</Text>
+              <Text style={[styles.cityTime, { color: timeColor }]}>{formatTime(item.zone, now)}</Text>
             </View>
           </Swipeable>
         )}
@@ -253,8 +259,8 @@ export default function SplashScreen() {
         presentationStyle="pageSheet"
         onRequestClose={() => { setShowAddModal(false); setSearch(''); }}
       >
-        <View style={styles.modal}>
-          <View style={styles.modalHeader}>
+        <View style={[styles.modal, { backgroundColor: bg }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: rowBorder }]}>
             <Text style={styles.modalTitle}>Add City</Text>
             <TouchableOpacity onPress={() => { setShowAddModal(false); setSearch(''); }}>
               <Text style={styles.modalClose}>Cancel</Text>
@@ -278,10 +284,10 @@ export default function SplashScreen() {
             renderItem={({ item }) => (
               <TouchableOpacity style={styles.modalRow} onPress={() => addCity(item)}>
                 <Text style={styles.modalCity}>{item.city}</Text>
-                <Text style={styles.modalOffset}>{getGMTOffset(item.zone, now)}</Text>
+                <Text style={[styles.modalOffset, { color: metaColor }]}>{getGMTOffset(item.zone, now)}</Text>
               </TouchableOpacity>
             )}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
+            ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: rowBorder }]} />}
           />
         </View>
       </Modal>
@@ -291,7 +297,7 @@ export default function SplashScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1 },
 
   // Header
   header: {
@@ -313,15 +319,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 14,
-    backgroundColor: '#000',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1e1e1e',
   },
   zoneLeft: { flex: 1, paddingRight: 12 },
   cityName: { color: '#fff', fontSize: 17, fontWeight: '500' },
-  cityMeta: { color: '#555', fontSize: 12, marginTop: 3 },
+  cityMeta: { fontSize: 12, marginTop: 3 },
   cityTime: {
-    color: '#aaa',
     fontSize: 20,
     fontWeight: '300',
     fontVariant: ['tabular-nums'],
@@ -339,7 +342,7 @@ const styles = StyleSheet.create({
   deleteText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 
   // Add city modal
-  modal: { flex: 1, backgroundColor: '#000' },
+  modal: { flex: 1 },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -348,7 +351,6 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#222',
   },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
   modalClose: { color: '#0a84ff', fontSize: 16 },
@@ -369,10 +371,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   modalCity: { color: '#fff', fontSize: 16 },
-  modalOffset: { color: '#555', fontSize: 14 },
+  modalOffset: { fontSize: 14 },
   separator: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#1e1e1e',
     marginLeft: 20,
   },
 });

@@ -586,7 +586,7 @@ function SelectableMediaThumbnail({ item, isSelecting, isSelected, onPress, onLo
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, backgroundColor: '#505050' },
 
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12 },
   headerLeft: { width: 72 },

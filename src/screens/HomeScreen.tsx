@@ -157,7 +157,7 @@ export default function HomeScreen() {
     (navigation as any).setOptions({
       tabBarStyle: isSelecting
         ? { display: 'none' }
-        : { backgroundColor: '#1c1c1e', borderTopColor: '#333' },
+        : { backgroundColor: '#3a3a3c', borderTopColor: '#505050' },
     });
   }, [isSelecting, navigation]);
 
@@ -621,7 +621,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#505050',
   },
   header: {
     flexDirection: 'row',
@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 16,
     marginBottom: 10,
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#3a3a3c',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -751,7 +751,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#333',
     marginVertical: 8,
   },
-  sbTrack: { position: 'absolute', top: 6, right: 0, bottom: 6, width: 20, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2 },
+  sbTrack: { position: 'absolute', top: 6, right: 0, bottom: 6, width: 20, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2 },
   sbThumb: { width: 4, borderRadius: 2, backgroundColor: '#ffffff', alignSelf: 'center' },
   fab: {
     position: 'absolute',

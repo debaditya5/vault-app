@@ -185,7 +185,6 @@ interface Props {
 }
 
 export default function MediaPickerModal({ visible, onCancel, onImport }: Props) {
-
   // ── Album list
   const [albums,        setAlbums]        = useState<AlbumHeader[]>([]);
   const [albumsLoading, setAlbumsLoading] = useState(false);
@@ -598,7 +597,10 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
           </TouchableOpacity>
 
           <View style={styles.searchWrap}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            {searchText.length > 0 && searchLoading
+              ? <ActivityIndicator size="small" color="#555" />
+              : <Text style={styles.searchIcon}>🔍</Text>
+            }
             <TextInput
               style={styles.searchInput}
               value={searchText}
@@ -607,10 +609,11 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
               placeholderTextColor="#555"
               autoCapitalize="none"
               autoCorrect={false}
-              clearButtonMode="while-editing"
             />
-            {searchLoading && (
-              <ActivityIndicator size="small" color="#555" style={{ marginLeft: 4 }} />
+            {searchText.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchText('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={styles.searchClear}>✕</Text>
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -763,12 +766,12 @@ export default function MediaPickerModal({ visible, onCancel, onImport }: Props)
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000' },
+  root: { flex: 1, backgroundColor: '#505050' },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#333',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#5e5e5e',
   },
   headerLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
   cancel:       { color: '#aaa', fontSize: 16 },
@@ -780,9 +783,9 @@ const styles = StyleSheet.create({
   filterBar: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 12, paddingVertical: 8, gap: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#5e5e5e',
   },
-  chip:           { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: '#1c1c1e' },
+  chip:           { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: '#3a3a3c' },
   chipActive:     { backgroundColor: '#0a84ff' },
   chipIcon:       { fontSize: 12 },
   chipText:       { color: '#aaa', fontSize: 12, fontWeight: '500' },
@@ -791,11 +794,12 @@ const styles = StyleSheet.create({
 
   searchWrap: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1c1c1e', borderRadius: 10,
+    backgroundColor: '#3a3a3c', borderRadius: 10,
     paddingHorizontal: 8, paddingVertical: 5, gap: 5,
   },
   searchIcon:  { fontSize: 11 },
   searchInput: { flex: 1, color: '#fff', fontSize: 13, padding: 0, margin: 0 },
+  searchClear: { color: '#888', fontSize: 14, fontWeight: '600' },
 
   searchStatus: {
     paddingHorizontal: 14, paddingVertical: 6,
@@ -812,7 +816,7 @@ const styles = StyleSheet.create({
   listRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 12, paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#1a1a1a',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#5e5e5e',
   },
   listRowSelected: { backgroundColor: 'rgba(10,132,255,0.12)' },
 
@@ -845,8 +849,8 @@ const styles = StyleSheet.create({
   accordionHeader: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 14, paddingVertical: 12,
-    backgroundColor: '#111',
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
+    backgroundColor: '#3a3a3c',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#5e5e5e',
   },
   accordionIcon:    { fontSize: 16, marginRight: 8 },
   accordionTitle:   { flex: 1, color: '#fff', fontSize: 14, fontWeight: '600' },
@@ -858,8 +862,8 @@ const styles = StyleSheet.create({
   emptyText:    { color: '#555', fontSize: 15 },
   loadingMore:  { paddingVertical: 16 },
 
-  sbTrack: { position: 'absolute', top: 6, right: 0, bottom: 6, width: 20, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2 },
-  sbThumb: { width: 4, borderRadius: 2, backgroundColor: '#ffffff', alignSelf: 'center' },
+  sbTrack: { position: 'absolute', top: 6, right: 0, bottom: 6, width: 28, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 4 },
+  sbThumb: { width: 10, borderRadius: 5, backgroundColor: '#ffffff', alignSelf: 'center' },
 });
 
 // ── Bottom-sheet styles ───────────────────────────────────────────────────────

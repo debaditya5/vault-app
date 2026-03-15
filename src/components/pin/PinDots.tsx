@@ -36,7 +36,7 @@ export default function PinDots({
       {Array.from({ length: maxLength }).map((_, i) => (
         <View
           key={i}
-          style={[styles.dot, i < pinLength && styles.dotFilled]}
+          style={[styles.dot, { opacity: i < pinLength ? 1 : 0.3 }]}
         />
       ))}
     </Animated.View>
@@ -54,9 +54,6 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-  },
-  dotFilled: {
     backgroundColor: '#ffffff',
   },
 });

@@ -10,6 +10,7 @@ import SplashScreen from '../screens/SplashScreen';
 import FolderScreen from '../screens/FolderScreen';
 import MediaViewerScreen from '../screens/MediaViewerScreen';
 import ChangePinScreen from '../screens/ChangePinScreen';
+import AboutScreen from '../screens/AboutScreen';
 import MainTabs from './MainTabs';
 import { Folder, MediaItem } from '../types';
 export type RootStackParamList = {
@@ -20,6 +21,7 @@ export type RootStackParamList = {
   Folder: { folder: Folder };
   MediaViewer: { items: MediaItem[]; initialIndex: number };
   ChangePin: undefined;
+  About: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -67,6 +69,11 @@ export default function RootNavigator() {
             name="ChangePin"
             component={ChangePinScreen}
             options={{ gestureEnabled: true }}
+          />
+          <Stack.Screen
+            name="About"
+            component={AboutScreen}
+            options={{ gestureEnabled: true, ...TransitionPresets.SlideFromRightIOS }}
           />
         </>
       )}

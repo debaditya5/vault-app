@@ -182,7 +182,18 @@ export default function SettingsScreen() {
         {/* About */}
         <Text style={styles.sectionHeader}>About</Text>
         <View style={styles.card}>
-          <View style={[styles.row, styles.rowBorder]}>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorder]}
+            onPress={() => navigation.navigate('About')}
+            activeOpacity={0.6}
+          >
+            <View style={styles.rowContent}>
+              <Text style={styles.rowLabel}>How It Works</Text>
+              <Text style={styles.rowSublabel}>Features, tips &amp; usage guide</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </TouchableOpacity>
+          <View style={styles.row}>
             <View style={styles.rowContent}>
               <Text style={styles.rowLabel}>TimeMatrix</Text>
               <Text style={styles.rowSublabel}>Secure photo &amp; video storage</Text>
@@ -196,16 +207,16 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, backgroundColor: '#505050' },
   scroll: { padding: 16, paddingBottom: 40 },
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', marginBottom: 8, paddingHorizontal: 4 },
   sectionHeader: {
     color: '#888', fontSize: 13, fontWeight: '500', textTransform: 'uppercase',
     letterSpacing: 0.5, marginTop: 24, marginBottom: 6, paddingHorizontal: 4,
   },
-  card: { backgroundColor: '#1c1c1e', borderRadius: 12, overflow: 'hidden' },
+  card: { backgroundColor: '#3a3a3c', borderRadius: 12, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
-  rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#333' },
+  rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#5e5e5e' },
   rowContent: { flex: 1 },
   rowLabel: { color: '#fff', fontSize: 16 },
   rowSublabel: { color: '#888', fontSize: 13, marginTop: 2 },
@@ -215,7 +226,7 @@ const styles = StyleSheet.create({
   durationRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' },
   durationChip: {
     paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12,
-    backgroundColor: '#2c2c2e',
+    backgroundColor: '#505050',
   },
   durationChipActive: { backgroundColor: '#0a84ff' },
   durationChipText: { color: '#888', fontSize: 13, fontWeight: '500' },
